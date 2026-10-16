@@ -38,7 +38,7 @@ window.CONFIG = {
   --f-head:"BIZ UDPMincho","Hiragino Mincho ProN","Yu Mincho",serif;
   --f-body:"BIZ UDPGothic","Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif;
   --f-num:"BIZ UDGothic","BIZ UDPGothic",ui-monospace,monospace;
-  --r:8px; --shadow:0 1px 2px rgba(20,30,50,.06),0 4px 14px rgba(20,30,50,.06);
+  --r:8px; --chipmix:18%; --shadow:0 1px 2px rgba(20,30,50,.06),0 4px 14px rgba(20,30,50,.06);
   color-scheme:light;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
@@ -47,7 +47,7 @@ window.CONFIG = {
   --c-apply:#e3a857; --c-apply-soft:#3a2c17; --c-exam:#8eaeea; --c-exam-soft:#22304a;
   --c-ann:#6cc794; --c-ann-soft:#1b3326; --c-proc:#e58aa9; --c-proc-soft:#3a1e2a; --c-kyo:#b39cf0; --c-kyo-soft:#2b2440;
   --warn:#f0b75a; --warn-soft:#382a12; --danger:#f19185; --danger-soft:#3b1d1a; --ok:#6cc794;
-  --shadow:0 1px 2px rgba(0,0,0,.3); color-scheme:dark;
+  --shadow:0 1px 2px rgba(0,0,0,.3); --chipmix:34%; color-scheme:dark;
 }}
 :root[data-theme="dark"]{
   --paper:#11151c; --surface:#1a2029; --sunken:#151a22; --ink:#e7eaf0; --muted:#9ba5b6; --line:#2d3542;
@@ -55,7 +55,7 @@ window.CONFIG = {
   --c-apply:#e3a857; --c-apply-soft:#3a2c17; --c-exam:#8eaeea; --c-exam-soft:#22304a;
   --c-ann:#6cc794; --c-ann-soft:#1b3326; --c-proc:#e58aa9; --c-proc-soft:#3a1e2a; --c-kyo:#b39cf0; --c-kyo-soft:#2b2440;
   --warn:#f0b75a; --warn-soft:#382a12; --danger:#f19185; --danger-soft:#3b1d1a; --ok:#6cc794;
-  --shadow:0 1px 2px rgba(0,0,0,.3); color-scheme:dark;
+  --shadow:0 1px 2px rgba(0,0,0,.3); --chipmix:34%; color-scheme:dark;
 }
 *{box-sizing:border-box}
 html,body{margin:0}
@@ -178,17 +178,43 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .cal .day .dots .dot{width:7px;height:7px;margin:0}
 .cal .day.today{outline:2px solid var(--ai)}
 .cal .day.kyo{background:var(--c-kyo-soft)}
-.bigcal .cal .day{min-height:64px;cursor:pointer;border:1px solid transparent;text-align:left;width:100%;display:block}
-.bigcal .cal .day:hover{border-color:var(--ai)}
-.bigcal .cal .day[aria-pressed="true"]{border-color:var(--ai);box-shadow:inset 0 0 0 1px var(--ai)}
-.bigcal .cal .day .c{font-family:var(--f-num);font-weight:700;font-size:15px;display:block;margin-top:2px}
-.bigcal .cal .day .mine{position:absolute;right:3px;top:3px;font-size:10px;background:var(--c-exam);color:var(--ai-ink);border-radius:4px;padding:0 4px}
-.bigcal .months{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
-.heat0{background:var(--sunken)!important}
-.heat1{background:color-mix(in srgb,var(--ai) 10%,var(--surface))!important}
-.heat2{background:color-mix(in srgb,var(--ai) 22%,var(--surface))!important}
-.heat3{background:color-mix(in srgb,var(--ai) 36%,var(--surface))!important}
-.heat4{background:color-mix(in srgb,var(--ai) 52%,var(--surface))!important}
+
+/* 大学群の色（カレンダーのチップ） */
+.g0{--gc:#b42335} .g1{--gc:#6b3fa0} .g2{--gc:#0f7c80} .g3{--gc:#c26a00} .g4{--gc:#7a5c2e} .g5{--gc:#2e8540} .g6{--gc:#c2417a} .g7{--gc:#1f4e9c} .g8{--gc:#5a6578}
+.uchip{display:inline-block;font-size:11.5px;line-height:1.45;padding:0 5px;border-radius:4px;border:1px solid transparent;cursor:pointer;white-space:nowrap;
+  background:color-mix(in srgb,var(--gc) var(--chipmix),var(--surface));color:var(--ink);font-weight:700}
+.uchip:hover{border-color:var(--gc)}
+.uchip.mine{border:1.5px solid var(--ink)}
+.more{border:0;background:none;color:var(--muted);font-size:11px;cursor:pointer;padding:0 2px;text-decoration:underline}
+.flabel{font-size:12px;color:var(--muted);font-weight:700;min-width:3.5em}
+.ulist{display:flex;flex-wrap:wrap;gap:3px;align-content:flex-start}
+.bigcal{display:grid;gap:16px}
+.bigcal .month h4{font-size:16px;margin-bottom:6px}
+.bigcal .cal{gap:3px}
+.bigcal .cal .day{min-height:92px;padding:4px;border:1px solid transparent;background:var(--surface);border-color:var(--line)}
+.bigcal .cal .day.pad{background:transparent;border-color:transparent}
+.bigcal .cal .day.sel{border-color:var(--ai);box-shadow:inset 0 0 0 1px var(--ai)}
+.bigcal .cal .day.kyo{background:var(--c-kyo-soft)}
+.dn{display:flex;justify-content:space-between;align-items:baseline;width:100%;background:none;border:0;padding:0 0 2px;cursor:pointer}
+.dn[disabled]{cursor:default}
+.dn .n{font-family:var(--f-num);font-size:13px;font-weight:700}
+.dn .c{font-size:11px;color:var(--muted)}
+.day.sun .dn .n{color:var(--danger)} .day.sat .dn .n{color:var(--ai)}
+.agenda{display:grid;gap:6px}
+.arow{display:grid;grid-template-columns:76px minmax(0,1fr);gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:8px}
+.arow.sel,.arow.today{border-color:var(--ai)}
+.arow .ad{background:none;border:0;padding:0;text-align:left;cursor:pointer;display:grid;font-family:var(--f-num)}
+.arow .ad small{color:var(--muted);font-size:11px}
+.ev{display:block;font-size:11px;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-radius:3px;padding:0 3px;margin-top:2px}
+.legend .ev{display:inline-block;margin:0}
+.e-exam{background:var(--c-exam-soft);color:var(--c-exam);font-weight:700} .e-apply{background:var(--c-apply-soft);color:var(--c-apply)}
+.e-ann{background:var(--c-ann-soft);color:var(--c-ann)} .e-proc{background:var(--c-proc-soft);color:var(--c-proc)} .e-kyo{background:var(--c-kyo-soft);color:var(--c-kyo);font-weight:700}
+.agenda .ev{display:inline-block;margin:0 3px 3px 0}
+.pcalwrap .month{margin-bottom:16px}
+.pcalwrap .month h4{font-size:16px;margin-bottom:6px}
+.pcalwrap .cal .day{min-height:78px;padding:3px;background:var(--surface);border:1px solid var(--line);overflow:hidden}
+.pcalwrap .cal .day.pad{background:transparent;border-color:transparent}
+.pcalwrap .cal .day.kyo{background:var(--c-kyo-soft)}
 
 /* search */
 .filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
@@ -248,7 +274,6 @@ table.ex tr.added td{background:var(--c-exam-soft)}
 /* print */
 #print{display:none}
 @media print{
-  @page{size:A4;margin:12mm 11mm}
   body{background:#fff;color:#111;padding:0;font-size:10.5pt}
   body::before{display:none}
   #app,.toast,.drawer{display:none!important}
@@ -273,6 +298,12 @@ table.ex tr.added td{background:var(--c-exam-soft)}
   .pp .ev{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .pp .e-apply{color:#8a4f00} .pp .e-exam{color:#1d3c78;font-weight:700} .pp .e-ann{color:#1f6a3f} .pp .e-proc{color:#9b2c52} .pp .e-kyo{color:#5a3aa0;font-weight:700}
   .pp .foot{font-size:7.5pt;color:#555;margin-top:2mm}
+  .pp .ev{background:none!important;padding:0;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pp.calonly .meta{margin-bottom:2mm}
+  .pp.calonly .pcal{page-break-inside:avoid;break-inside:avoid}
+  .pp.calonly .pcal td{font-size:8pt;line-height:1.3;padding:0.8mm 1.2mm}
+  .pp.calonly .pcal td .n{font-size:9pt}
+  .pp.calonly .pcal th{font-size:9pt;padding:1mm}
 }
 </style>
 </head>
@@ -333,7 +364,7 @@ function ingestWorkbook(wb) {
       fac: String(r['学部'] || '').trim(), dep: String(r['学科'] || '').trim(), met: String(r['方式'] || '').trim(),
       kind: String(r['種別'] || '一般').trim(), date: normDate(r['試験日']), open: normDate(r['出願開始']),
       close: normDate(r['出願締切']), ann: normDate(r['合格発表']), proc: normDate(r['手続締切']),
-      rank: String(r['偏差値帯'] || '').trim(), note: String(r['備考'] || '').trim(), conf: String(r['確度'] || '').trim(), src: String(r['出典'] || '').trim()
+      field: String(r['分野'] || '').trim(), rank: String(r['偏差値帯'] || '').trim(), note: String(r['備考'] || '').trim(), conf: String(r['確度'] || '').trim(), src: String(r['出典'] || '').trim()
     };
     if (!x.uni) continue;
     if (!x.id) x.id = 'x' + strHash([x.uni, x.fac, x.dep, x.met, x.kind, x.date].join('|'));
@@ -344,11 +375,11 @@ function ingestWorkbook(wb) {
   const ush = wb.Sheets['大学'];
   if (ush) for (const r of XLSX.utils.sheet_to_json(ush, { defval: '' })) {
     const u = String(r['大学'] || '').trim(); if (!u) continue;
-    uniInfo[u] = { disp: String(r['表示名'] || u), grp: String(r['区分'] || ''), kokushi: String(r['国私'] || '') };
+    uniInfo[u] = { disp: String(r['表示名'] || u), abbr: String(r['略称'] || u), grp: String(r['区分'] || ''), kokushi: String(r['国私'] || '') };
     unis.push(u); if (r['区分'] && !groups.includes(r['区分'])) groups.push(String(r['区分']));
   }
   for (const x of rows) {
-    if (!uniInfo[x.uni]) { uniInfo[x.uni] = { disp: x.uni, grp: x.grp || 'その他', kokushi: '' }; unis.push(x.uni); }
+    if (!uniInfo[x.uni]) { uniInfo[x.uni] = { disp: x.uni, abbr: x.uni, grp: x.grp || 'その他', kokushi: '' }; unis.push(x.uni); }
     if (!x.grp) x.grp = uniInfo[x.uni].grp;
     const g = uniInfo[x.uni].grp; if (g && !groups.includes(g)) groups.push(g);
   }
@@ -371,6 +402,27 @@ async function loadMaster() {
   ingestWorkbook(XLSX.read(await res.arrayBuffer(), { type: 'array' }));
 }
 const uniName = u => (M.uniInfo[u] && M.uniInfo[u].disp) || u;
+const uniAbbr = u => (M.uniInfo[u] && M.uniInfo[u].abbr) || String(u).replace(/大学$/, '');
+const grpIdx = u => Math.max(0, M.groups.indexOf((M.uniInfo[u] || {}).grp));
+/* 分野（カレンダーの絞り込み用）。master.xlsx に「分野」列があればそれを優先 */
+const FIELD_LIST = ['理工・情報', '医療・看護', '薬学', '国際・語学', '経済・経営', '法・政治', '文・教育・心理'];
+function fieldClass(t) {
+  if (!t) return null;
+  if (/薬/.test(t)) return '薬学';
+  if (/看護|医療|保健|^医$|医学|歯|衛生|放射線|リハビリ|臨床/.test(t)) return '医療・看護';
+  if (/工学|理工|工$|システム工/.test(t)) return '理工・情報';
+  if (/国際|外国語|グローバル|異文化|英語|英米|ドイツ|フランス|中国|スペイン|言語|語学|語$|観光/.test(t)) return '国際・語学';
+  if (/経済|経営|商|会計|ビジネス|金融|マーケティング/.test(t)) return '経済・経営';
+  if (/法|政治|政策|政経|危機管理/.test(t)) return '法・政治';
+  if (!/情報コミュニケーション|社会情報|総合情報|人間環境|人間科学|心理|教育|社会|文化|地理/.test(t) &&
+      /理|工|情報|数|建築|デザイン|農|生命|生物|環境|科学|データ|海洋|獣医|物理|化学|機械|電気|電子|メディア|宇宙|食|先進|創域|基幹|創造/.test(t)) return '理工・情報';
+  if (/文|教育|心理|社会|人間|福祉|神|仏教|史|哲|コミュニティ|芸|スポーツ|現代|教養|子ども|情報コミュニケーション|地理/.test(t)) return '文・教育・心理';
+  return null;
+}
+function fieldOf(x) {
+  if (x._f === undefined) x._f = (FIELD_LIST.includes(x.field) && x.field) || fieldClass(x.dep) || fieldClass(x.fac) || '文・教育・心理';
+  return x._f;
+}
 const facName = f => !f ? '' : (/(学部|学院|学群|学環|類|部)$/.test(f) ? f : f + '学部');
 const depName = d => !d ? '' : (/(学科|専攻|コース|課程|系|類|プログラム|学環|専修)$/.test(d) ? d : d + '学科');
 
@@ -449,7 +501,7 @@ async function copyText(text) {
    ============================================================ */
 const STATE = { view: 'login', tab: 'plan', me: null, code: '', saveState: '', newConfirm: false,
   search: { grp: '', q: '', uni: '', kinds: new Set(KINDS.filter(k => k !== '共テ利用')), fq: '' },
-  cal: { grps: new Set(), q: '', day: '', kinds: new Set(['一般', '共テ併用', '国公立']) },
+  cal: { grps: new Set(), q: '', day: '', focus: '', field: '', kinds: new Set(['一般', '共テ併用', '国公立']) }, planView: 'list',
   kyo: { grp: '', uni: '', fq: '' },
   icsTypes: new Set(['exam', 'apply', 'ann', 'proc']),
   teacher: { students: [], cls: '', q: '', sel: new Set(), tab: 'list', detail: null, conv: null, imp: '' }
@@ -650,7 +702,9 @@ function planHTML() {
     <div class="sec-h" style="margin-top:22px"><h2>共通テスト利用</h2><span class="hint">合格発表順</span></div>
     ${kyo.length ? kyo.map(p => pickHTML(p, ps)).join('') : `<div class="empty">共テ利用はまだありません。<button class="linkbtn" data-tab="kyo">共テ利用タブ</button>から追加できます。</div>`}`
     : `<div class="empty"><b>まだ受験校がありません。</b><br>「<button class="linkbtn" data-tab="uni">大学から追加</button>」か「<button class="linkbtn" data-tab="cal">カレンダーから追加</button>」で選んでください。</div>`;
-  return `<div class="plan"><div style="min-width:0">${list}</div>
+  const toggle = all.length ? `<div class="filters" style="margin-bottom:6px"><button class="fchip" data-pview="list" aria-pressed="${STATE.planView === 'list'}">リスト</button><button class="fchip" data-pview="cal" aria-pressed="${STATE.planView === 'cal'}">カレンダー</button></div>` : '';
+  const main = STATE.planView === 'cal' && all.length ? `${legendHTML()}${planCalHTML(ps)}` : list;
+  return `<div class="plan"><div style="min-width:0">${toggle}${main}</div>
     <aside class="side">
       <div class="panel export" id="submitPanel"><h3>先生に提出</h3>
         <div id="submitState" style="font-size:13px">${submitStateHTML()}</div>
@@ -662,17 +716,17 @@ function planHTML() {
           <p class="note">このコードをメモやスクショで残しておくと、別の端末や入力が消えたときに、最初の画面の「復元コードから再開」で元に戻せます。</p></details>
       </div>
       <div class="panel export"><h3>書き出す</h3>
-        <button class="btn primary" data-act="pdf">日程表をPDFに（印刷画面）</button>
-        <p class="note" style="margin:0">印刷画面で「PDFに保存」を選ぶと、一覧表と1〜3月のカレンダーがPDFになります。</p>
+        <button class="btn primary" data-act="pdfcal">カレンダーをPDFに（横向き）</button>
+        <button class="btn" data-act="pdf">一覧表＋カレンダーをPDFに</button>
+        <p class="note" style="margin:0">印刷画面で「PDFに保存」を選ぶとPDFになります。カレンダーは1か月1ページで、大学名は略記です。</p>
         <button class="btn" data-act="ics">カレンダーに追加（.ics）</button>
         <div class="opts">${Object.entries(EV).map(([k, l]) => `<label><input type="checkbox" data-ics="${k}"${STATE.icsTypes.has(k) ? ' checked' : ''}> ${l}</label>`).join('')}</div>
         <p class="note" style="margin:0">iPhoneはダウンロード後に「カレンダーに追加」。Googleカレンダーはパソコンの「設定→インポート」で読み込めます。</p>
       </div>
-      <div class="panel"><h3>自分の日程</h3>${legendHTML()}${miniCalsHTML(ps)}</div>
     </aside></div>`;
 }
 function legendHTML() {
-  return `<div class="legend"><span><i class="dot d-apply"></i>出願締切</span><span><i class="dot d-exam"></i>試験</span><span><i class="dot d-ann"></i>合格発表</span><span><i class="dot d-proc"></i>手続締切</span><span><i class="dot d-kyo"></i>共通テスト</span></div>`;
+  return `<div class="legend"><span class="ev e-exam">◎試験</span><span class="ev e-apply">〆出願締切</span><span class="ev e-ann">発 合格発表</span><span class="ev e-proc">手 手続締切</span><span class="ev e-kyo">共テ</span></div>`;
 }
 function calMonths() {
   const s = M.settings.calStart || `${M.settings.year - 1 || 2026}-12-01`, e = M.settings.calEnd || `${M.settings.year || 2027}-03-31`;
@@ -687,15 +741,31 @@ function monthHTML(y, m, cell, cls = '') {
   for (let d = 1; d <= days; d++) { const iso = `${y}-${pad2(m + 1)}-${pad2(d)}`; h += cell(iso, new Date(y, m, d).getDay()); }
   return h + `</div></div>`;
 }
-function miniCalsHTML(ps) {
-  const map = {};
-  ps.flatMap(eventsOf).forEach(e => (map[e.date] = map[e.date] || []).push(e));
-  const months = calMonths().filter(([y, m]) => Object.keys(map).some(k => k.startsWith(`${y}-${pad2(m + 1)}`)) || m <= 2);
-  return months.map(([y, m]) => monthHTML(y, m, (iso, wd) => {
+const EV_SYM = { apply: '〆', exam: '◎', ann: '発', proc: '手' };
+const EV_ORDER = ['exam', 'apply', 'ann', 'proc'];
+function evLabel(e, long) {
+  const x = e.x; let t = EV_SYM[e.type] + uniAbbr(x.uni);
+  if (e.type === 'exam') t += ' ' + (x.fac || '') + (long ? ' ' + x.met : '');
+  else if (long) t += ' ' + (x.kind === '共テ利用' ? '共テ利用' : x.met);
+  return t;
+}
+function eventMap(ps) {
+  const map = {}; ps.flatMap(eventsOf).forEach(e => (map[e.date] = map[e.date] || []).push(e));
+  Object.values(map).forEach(a => a.sort((p, q) => EV_ORDER.indexOf(p.type) - EV_ORDER.indexOf(q.type)));
+  return map;
+}
+const isNarrow = () => window.innerWidth < 700;
+function planCalHTML(ps) {
+  const map = eventMap(ps);
+  const months = calMonths().filter(([y, m]) => Object.keys(map).some(k => k.startsWith(`${y}-${pad2(m + 1)}`)) || M.settings.kyo.some(k => k.startsWith(`${y}-${pad2(m + 1)}`)));
+  if (isNarrow()) {
+    const days = [...new Set(Object.keys(map).concat(M.settings.kyo))].sort();
+    return `<div class="agenda">${days.map(d => `<div class="arow${d === today ? ' today' : ''}"><div class="ad"><b>${fmt(d)}</b></div><div class="ulist">${M.settings.kyo.includes(d) ? '<span class="ev e-kyo">共通テスト</span>' : ''}${(map[d] || []).map(e => `<span class="ev e-${e.type}">${esc(evLabel(e, true))}</span>`).join('')}</div></div>`).join('')}</div>`;
+  }
+  return `<div class="pcalwrap">${months.map(([y, m]) => monthHTML(y, m, (iso, wd) => {
     const es = map[iso] || []; const kyo = M.settings.kyo.includes(iso);
-    const title = es.map(e => `${EV[e.type]}：${label(e.x, true)}`).join('\n') + (kyo ? '\n共通テスト' : '');
-    return `<div class="day${wd === 0 ? ' sun' : wd === 6 ? ' sat' : ''}${iso === today ? ' today' : ''}${kyo ? ' kyo' : ''}" title="${esc(title)}"><span class="n">${dOf(iso).getDate()}</span><span class="dots">${kyo ? '<i class="dot d-kyo"></i>' : ''}${es.map(e => `<i class="dot d-${e.type}"></i>`).join('')}</span></div>`;
-  })).join('');
+    return `<div class="day${wd === 0 ? ' sun' : wd === 6 ? ' sat' : ''}${iso === today ? ' today' : ''}${kyo ? ' kyo' : ''}"><span class="n">${dOf(iso).getDate()}</span>${kyo ? '<span class="ev e-kyo">共通テスト</span>' : ''}${es.map(e => `<span class="ev e-${e.type}" title="${esc(EV[e.type] + '：' + label(e.x) + ' ' + e.x.met)}">${esc(evLabel(e, false))}</span>`).join('')}</div>`;
+  })).join('')}</div>`;
 }
 
 /* ---------- 追加 ---------- */
@@ -764,35 +834,57 @@ function sortRows(rows) { return rows.slice().sort((a, b) => (a.dep || '').local
 /* ---------- カレンダーから ---------- */
 function calFilter(x) {
   const c = STATE.cal; const q = c.q.trim();
-  return x.date && c.kinds.has(x.kind) && (!c.grps.size || c.grps.has(M.uniInfo[x.uni].grp)) && (!q || (uniName(x.uni) + x.uni + x.fac + x.dep + x.met).includes(q));
+  return x.date && c.kinds.has(x.kind) && (!c.field || fieldOf(x) === c.field) && (!c.grps.size || c.grps.has(M.uniInfo[x.uni].grp)) && (!q || (uniName(x.uni) + uniAbbr(x.uni) + x.fac + x.dep + x.met).includes(q));
+}
+const CELL_MAX = 10;
+function uchipHTML(iso, u, n, mineU) {
+  return `<button class="uchip g${grpIdx(u)}${mineU.has(iso + '|' + u) ? ' mine' : ''}" data-pickuni="${esc(iso + '|' + u)}" title="${esc(uniName(u))} ${n}件">${esc(uniAbbr(u))}</button>`;
 }
 function calTabHTML() {
   const c = STATE.cal;
-  const counts = {}; M.rows.forEach(x => { if (calFilter(x)) counts[x.date] = (counts[x.date] || 0) + 1; });
-  const max = Math.max(1, ...Object.values(counts));
-  const mineD = {}; activePicks().forEach(p => { const d = exOf(p).date; if (d && exOf(p).kind !== '共テ利用') mineD[d] = (mineD[d] || 0) + 1; });
-  const months = calMonths().filter(([y, m]) => Object.keys(counts).some(k => k.startsWith(`${y}-${pad2(m + 1)}`)));
-  const cal = months.map(([y, m]) => monthHTML(y, m, (iso, wd) => {
-    const n = counts[iso] || 0; const lv = n ? Math.min(4, 1 + Math.floor(3 * n / max)) : 0;
-    const kyo = M.settings.kyo.includes(iso);
-    return `<button class="day heat${lv}${wd === 0 ? ' sun' : wd === 6 ? ' sat' : ''}" data-day="${iso}" aria-pressed="${c.day === iso}"><span class="n">${dOf(iso).getDate()}</span>${n ? `<span class="c">${n}</span>` : kyo ? '<span class="note" style="margin:0">共テ</span>' : ''}${mineD[iso] ? `<span class="mine">予定${mineD[iso]}</span>` : ''}</button>`;
-  })).join('');
-  return `<div class="filters">${grpChips(c.grps, 'data-cgrp', false)}<input class="inp search" id="c-q" placeholder="大学・学部・学科で絞り込み（例：情報、看護、明治）" value="${esc(c.q)}"></div>
-    <div class="filters">${['一般', '共テ併用', '国公立'].map(k => `<button class="fchip" data-ckind="${k}" aria-pressed="${c.kinds.has(k)}">${k}</button>`).join('')}<span class="note">日付の数字＝その日に試験がある入試の件数（今の絞り込み条件）。日付を押すと一覧が出ます。</span></div>
-    <div class="bigcal"><div class="months">${cal || '<div class="empty">条件に合う試験日がありません。</div>'}</div></div>
+  const byDay = {};
+  M.rows.forEach(x => { if (!calFilter(x)) return; const m = byDay[x.date] || (byDay[x.date] = new Map()); m.set(x.uni, (m.get(x.uni) || 0) + 1); });
+  const order = u => M.unis.indexOf(u);
+  const mineU = new Set(); activePicks().forEach(p => { const x = exOf(p); if (x.date && x.kind !== '共テ利用') mineU.add(x.date + '|' + x.uni); });
+  const days = Object.keys(byDay).sort();
+  const total = d => [...byDay[d].values()].reduce((a, b) => a + b, 0);
+  let body;
+  if (!days.length) body = '<div class="empty">条件に合う試験日がありません。</div>';
+  else if (isNarrow()) {
+    body = `<div class="agenda">${days.map(d => { const us = [...byDay[d].keys()].sort((a, b) => order(a) - order(b));
+      return `<div class="arow${c.day === d ? ' sel' : ''}"><button class="ad" data-day="${d}"><b>${fmt(d)}</b><small>${us.length}校</small></button><div class="ulist">${us.map(u => uchipHTML(d, u, byDay[d].get(u), mineU)).join('')}</div></div>`; }).join('')}</div>`;
+  } else {
+    const months = calMonths().filter(([y, m]) => days.some(k => k.startsWith(`${y}-${pad2(m + 1)}`)));
+    body = `<div class="bigcal">${months.map(([y, m]) => monthHTML(y, m, (iso, wd) => {
+      const mp = byDay[iso]; const kyo = M.settings.kyo.includes(iso);
+      const us = mp ? [...mp.keys()].sort((a, b) => order(a) - order(b)) : [];
+      return `<div class="day${wd === 0 ? ' sun' : wd === 6 ? ' sat' : ''}${c.day === iso ? ' sel' : ''}${kyo ? ' kyo' : ''}">
+        <button class="dn" data-day="${iso}" ${us.length ? '' : 'disabled'}><span class="n">${dOf(iso).getDate()}</span>${us.length ? `<span class="c">${us.length}校</span>` : kyo ? '<span class="c">共テ</span>' : ''}</button>
+        <div class="ulist">${us.slice(0, CELL_MAX).map(u => uchipHTML(iso, u, mp.get(u), mineU)).join('')}${us.length > CELL_MAX ? `<button class="more" data-day="${iso}">他${us.length - CELL_MAX}校</button>` : ''}</div></div>`;
+    })).join('')}</div>`;
+  }
+  const grpLegend = M.groups.map((g, i) => `<span class="uchip g${i}" style="cursor:default">${esc(g)}</span>`).join('');
+  return `<div class="filters"><span class="flabel">分野</span><button class="fchip" data-cfield="" aria-pressed="${!c.field}">すべて</button>${FIELD_LIST.map(f => `<button class="fchip" data-cfield="${f}" aria-pressed="${c.field === f}">${f}</button>`).join('')}</div>
+    <div class="filters"><span class="flabel">大学群</span>${grpChips(c.grps, 'data-cgrp', false)}<input class="inp search" id="c-q" placeholder="大学・学部・学科で絞り込み（例：情報、明治）" value="${esc(c.q)}"></div>
+    <div class="filters"><span class="flabel">種別</span>${['一般', '共テ併用', '国公立'].map(k => `<button class="fchip" data-ckind="${k}" aria-pressed="${c.kinds.has(k)}">${k}</button>`).join('')}</div>
+    <p class="note" style="margin:-4px 0 10px">大学名を押すと、その日のその大学の学部・学科・方式が出ます。日付を押すとその日の全大学。枠線つきの大学は追加済みです。色は大学群：${grpLegend}</p>
+    ${body}
     <section id="dayPanel" style="margin-top:16px">${c.day ? dayPanelHTML(c.day) : ''}</section>`;
 }
 function dayPanelHTML(day) {
+  const c = STATE.cal;
   const rows = M.rows.filter(x => x.date === day && calFilter(x));
   const unis = []; const by = {};
   rows.forEach(x => { if (!by[x.uni]) { by[x.uni] = []; unis.push(x.uni); } by[x.uni].push(x); });
   unis.sort((a, b) => M.unis.indexOf(a) - M.unis.indexOf(b));
-  const open = unis.length <= 3;
-  return `<div class="sec-h"><h2>${fmt(day)} の試験</h2><span class="hint">${rows.length}件・${unis.length}大学</span></div>
-    ${unis.map(u => `<details class="fac" data-dayuni="${esc(u)}"${open ? ' open' : ''}><summary>${esc(uniName(u))}<span class="chip">${esc(M.uniInfo[u].grp)}</span><span class="c">${by[u].length}件</span></summary><div class="fac-body">${open ? exRowsHTML(by[u].slice().sort((a, b) => a.fac.localeCompare(b.fac, 'ja') || a.dep.localeCompare(b.dep, 'ja')), { showFac: true }) : ''}</div></details>`).join('') || '<div class="empty">この日は条件に合う試験がありません。</div>'}`;
+  const focus = c.focus && by[c.focus] ? c.focus : '';
+  const show = focus ? [focus] : unis;
+  const open = focus || unis.length <= 3;
+  const sorter = (a, b) => a.fac.localeCompare(b.fac, 'ja') || a.dep.localeCompare(b.dep, 'ja');
+  return `<div class="sec-h"><h2>${fmt(day)} ${focus ? esc(uniName(focus)) : 'の試験'}</h2><span class="hint">${focus ? `${by[focus].length}件` : `${rows.length}件・${unis.length}大学`}</span>
+      ${focus && unis.length > 1 ? `<button class="btn sm" data-day="${day}">この日のほかの大学も見る（${unis.length - 1}校）</button>` : ''}</div>
+    ${show.map(u => `<details class="fac" data-dayuni="${esc(u)}"${open ? ' open' : ''}><summary><span class="uchip g${grpIdx(u)}" style="cursor:inherit">${esc(uniAbbr(u))}</span>${esc(uniName(u))}<span class="c">${by[u].length}件</span></summary><div class="fac-body">${open ? exRowsHTML(by[u].slice().sort(sorter), { showFac: true }) : ''}</div></details>`).join('') || '<div class="empty">この日は条件に合う試験がありません。</div>'}`;
 }
-
-/* ---------- 共テ利用 ---------- */
 function kyoTabHTML() {
   const k = STATE.kyo;
   if (k.uni) return uniDetailHTML(k.uni, k, true);
@@ -858,14 +950,13 @@ function printHTMLFor(st) {
   const months = calMonths().filter(([y, m]) => m <= 2 || Object.keys(evMap).some(k => k.startsWith(`${y}-${pad2(m + 1)}`)));
   const cnt = ym => Object.keys(evMap).filter(k => k.startsWith(`${ym[0]}-${pad2(ym[1] + 1)}`)).reduce((a, k) => a + evMap[k].filter(e => e.type === 'exam').length, 0);
   const big = months.slice().sort((a, b) => cnt(b) - cnt(a))[0];
-  const shortU = u => uniName(u).replace(/大学$/, '').replace(/^東京/, '東').slice(0, 5);
   const pcal = ([y, m], isBig) => {
     const first = new Date(y, m, 1), days = new Date(y, m + 1, 0).getDate(); let cells = [];
     for (let i = 0; i < first.getDay(); i++) cells.push('<td class="o"></td>');
     for (let d = 1; d <= days; d++) {
       const iso = `${y}-${pad2(m + 1)}-${pad2(d)}`; const es = (evMap[iso] || []).slice().sort((a, b) => ['exam', 'apply', 'ann', 'proc'].indexOf(a.type) - ['exam', 'apply', 'ann', 'proc'].indexOf(b.type));
       const kyo = M.settings.kyo.includes(iso);
-      cells.push(`<td><span class="n">${d}</span>${kyo ? '<span class="ev e-kyo">共テ</span>' : ''}${es.map(e => `<span class="ev e-${e.type}">${{ apply: '〆', exam: '◎', ann: '発', proc: '手' }[e.type]}${esc(isBig ? uniName(e.x.uni).replace(/大学$/, '') + (e.type === 'exam' ? ' ' + e.x.fac : '') : shortU(e.x.uni))}</span>`).join('')}</td>`);
+      cells.push(`<td><span class="n">${d}</span>${kyo ? '<span class="ev e-kyo">共テ</span>' : ''}${es.map(e => `<span class="ev e-${e.type}">${esc(isBig ? evLabel(e, false) : EV_SYM[e.type] + uniAbbr(e.x.uni))}</span>`).join('')}</td>`);
     }
     while (cells.length % 7) cells.push('<td class="o"></td>');
     let h = `<div><h2>${y}年${m + 1}月</h2><table class="pcal${isBig ? ' big' : ''}"><tr>${[...WD].map(w => `<th>${w}</th>`).join('')}</tr>`;
@@ -883,8 +974,29 @@ function printHTMLFor(st) {
     <section class="pp"><h1>${esc(st.name)}さんの受験カレンダー</h1><div class="meta"><span>◎試験　〆出願締切　発 合格発表　手 手続締切</span><span>${esc(st.cls)} ${esc(st.no)}番</span></div>
     ${big ? pcal(big, true) : ''}<div class="pm">${months.filter(x => x !== big).map(x => pcal(x, false)).join('')}</div></section>`;
 }
-function doPrint(students) {
-  $('#print').innerHTML = students.map(printHTMLFor).join('');
+function calPrintHTMLFor(st) {
+  const ps = (st.picks || []).filter(p => !['取りやめ', '不合格'].includes(p.status));
+  const map = eventMap(ps);
+  const months = calMonths().filter(([y, m]) => Object.keys(map).some(k => k.startsWith(`${y}-${pad2(m + 1)}`)));
+  return months.map(([y, m]) => {
+    const first = new Date(y, m, 1), days = new Date(y, m + 1, 0).getDate(); const cells = [];
+    for (let i = 0; i < first.getDay(); i++) cells.push('<td class="o"></td>');
+    for (let d = 1; d <= days; d++) {
+      const iso = `${y}-${pad2(m + 1)}-${pad2(d)}`; const kyo = M.settings.kyo.includes(iso);
+      cells.push(`<td${iso < today ? '' : ''}><span class="n">${d}</span>${kyo ? '<span class="ev e-kyo">共通テスト</span>' : ''}${(map[iso] || []).map(e => `<span class="ev e-${e.type}">${esc(evLabel(e, true))}</span>`).join('')}</td>`);
+    }
+    while (cells.length % 7) cells.push('<td class="o"></td>');
+    const nRows = cells.length / 7, hmm = Math.min(30, Math.floor(158 / nRows));
+    let rowsH = ''; for (let i = 0; i < cells.length; i += 7) rowsH += `<tr style="height:${hmm}mm">${cells.slice(i, i + 7).join('').replace(/<td/g, `<td style="height:${hmm}mm"`)}</tr>`;
+    return `<section class="pp calonly"><div class="meta"><span><b style="font-size:15pt">${y}年${m + 1}月</b>　${esc(st.cls)} ${esc(st.no)}番 ${esc(st.name)}</span><span>◎試験　〆出願締切　発 合格発表　手 手続締切　（出力 ${today.replace(/-/g, '/')}）</span></div>
+      <table class="pcal"><tr>${[...WD].map(w => `<th>${w}</th>`).join('')}</tr>${rowsH}</table></section>`;
+  }).join('') || `<section class="pp"><h1>${esc(st.name)}さんの受験カレンダー</h1><p>受験予定が登録されていません。</p></section>`;
+}
+function doPrint(students, mode) {
+  let ps = document.getElementById('pageStyle');
+  if (!ps) { ps = document.createElement('style'); ps.id = 'pageStyle'; document.head.appendChild(ps); }
+  ps.textContent = mode === 'cal' ? '@page{size:A4 landscape;margin:8mm 9mm}' : '@page{size:A4 portrait;margin:12mm 11mm}';
+  $('#print').innerHTML = students.map(mode === 'cal' ? calPrintHTMLFor : printHTMLFor).join('');
   setTimeout(() => window.print(), 60);
 }
 function icsEscape(s) { return String(s || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n'); }
@@ -1127,7 +1239,14 @@ document.addEventListener('click', async e => {
   if (d.kind) { const k = STATE.search.kinds; k.has(d.kind) ? k.delete(d.kind) : k.add(d.kind); rerenderTab(); return; }
   if (d.cgrp !== undefined) { const g = STATE.cal.grps; g.has(d.cgrp) ? g.delete(d.cgrp) : g.add(d.cgrp); rerenderTab(); return; }
   if (d.ckind) { const k = STATE.cal.kinds; k.has(d.ckind) ? k.delete(d.ckind) : k.add(d.ckind); rerenderTab(); return; }
-  if (d.day) { STATE.cal.day = d.day; $$('[data-day]').forEach(b => b.setAttribute('aria-pressed', b.dataset.day === d.day)); $('#dayPanel').innerHTML = dayPanelHTML(d.day); afterRender(); $('#dayPanel').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+  if (d.day || d.pickuni) {
+    const [day, u] = d.pickuni ? d.pickuni.split('|') : [d.day, ''];
+    STATE.cal.day = day; STATE.cal.focus = u;
+    $$('.bigcal .day, .arow').forEach(el => el.classList.toggle('sel', !!el.querySelector(`[data-day="${day}"]`)));
+    $('#dayPanel').innerHTML = dayPanelHTML(day); afterRender(); $('#dayPanel').scrollIntoView({ behavior: 'smooth', block: 'start' }); return;
+  }
+  if (d.cfield !== undefined) { STATE.cal.field = d.cfield; STATE.cal.focus = ''; rerenderTab(); return; }
+  if (d.pview) { STATE.planView = d.pview; rerenderTab(); return; }
   if (d.kgrp !== undefined) { STATE.kyo.grp = d.kgrp; rerenderTab(); return; }
   if (d.kuni) { STATE.kyo.uni = d.kuni; STATE.kyo.fq = ''; rerenderTab(); window.scrollTo({ top: 0 }); return; }
   if (d.ics) { STATE.icsTypes[t.checked ? 'add' : 'delete'](d.ics); return; }
@@ -1162,6 +1281,7 @@ document.addEventListener('click', async e => {
     case 'uniback': STATE.search.uni = ''; rerenderTab(); break;
     case 'kyoback': STATE.kyo.uni = ''; rerenderTab(); break;
     case 'pdf': doPrint([STATE.me]); break;
+    case 'pdfcal': if (!activePicks().length) { toast('先に受験校を追加してください'); break; } doPrint([STATE.me], 'cal'); break;
     case 'ics': {
       const ps = activePicks(); if (!ps.length) { toast('先に受験校を追加してください'); break; }
       download(`受験予定_${STATE.me.cls}_${STATE.me.no}.ics`, buildICS(STATE.me, STATE.icsTypes), 'text/calendar;charset=utf-8'); toast('カレンダーファイルを書き出しました'); break;
@@ -1213,6 +1333,9 @@ document.addEventListener('change', e => {
     const hd = $('.strip'); if (hd) hd.outerHTML = summaryHTML(STATE.me);
   }
 });
+
+let lastNarrow = null;
+window.addEventListener('resize', () => { const n = isNarrow(); if (lastNarrow !== null && n !== lastNarrow && STATE.view === 'student' && ['cal', 'plan'].includes(STATE.tab)) rerenderTab(); lastNarrow = n; });
 
 /* ============================================================
    起動
