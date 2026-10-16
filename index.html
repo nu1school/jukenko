@@ -1,0 +1,1233 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>受験校プランナー</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&family=BIZ+UDPMincho:wght@400;700&family=BIZ+UDGothic:wght@400;700&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+/* ============================================================
+   設定（ここだけ書き換えれば動きます）
+   ============================================================ */
+window.CONFIG = {
+  // 大学データ（Excel）。GitHub Pages に置くなら相対パスのままでOK
+  MASTER_URL: 'data/master.xlsx',
+  // 提出先：Microsoft Forms の「事前入力済みリンク」をそのまま貼る（作り方は README）。
+  // 組・番号・氏名・提出コードの欄に、それぞれ CLASS / NO / NAME / CODE と入れて取得したURLです。空欄なら提出ボタンは「コードをコピー」になります
+  FORM_URL: 'https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=GHfprcz9AEmVhDXsMMWmrPM0b5nG_XhMtPy8dELv799UQkFVUUE2Nk1YVEhZTDJYUThPWU5KUjM3TS4u&r40bc3edd84164de48ecdd88c22738bd6=CLASS&r41302d5b42454dff869349e9cf58a821=NO&r74e50b72ed5f4c50bec16c8ed131ff9c=NAME&r9bfaf319ed6a43d996dcb1ed8d7c5439=CODE',
+  // 画面に出す学校名
+  SCHOOL: '',
+  // 組の選択肢。空配列なら自由入力
+  CLASSES: ['3-1', '3-2', '3-3', '3-4', '3-5', '3-6', '3-7', '3-8']
+};
+</script>
+<style>
+/* 受験票のような落ち着いた紙面：藍のインクに、4種類の日程（出願・試験・発表・手続）だけを色で区別する */
+:root{
+  --paper:#f4f6f9; --surface:#ffffff; --sunken:#eef1f6; --ink:#1a2333; --muted:#5a6578; --line:#d6dce6;
+  --ai:#24498c; --ai-ink:#ffffff; --ai-soft:#e3eaf6;
+  --c-apply:#a86512; --c-apply-soft:#fbefdc;
+  --c-exam:#24498c; --c-exam-soft:#e3eaf6;
+  --c-ann:#2d7a4f; --c-ann-soft:#e0f1e6;
+  --c-proc:#b03a62; --c-proc-soft:#f8e4ec;
+  --c-kyo:#6a4bb0; --c-kyo-soft:#ece6f8;
+  --warn:#9a5b00; --warn-soft:#fdf1d8; --danger:#b42318; --danger-soft:#fde7e4; --ok:#2d7a4f;
+  --f-head:"BIZ UDPMincho","Hiragino Mincho ProN","Yu Mincho",serif;
+  --f-body:"BIZ UDPGothic","Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif;
+  --f-num:"BIZ UDGothic","BIZ UDPGothic",ui-monospace,monospace;
+  --r:8px; --shadow:0 1px 2px rgba(20,30,50,.06),0 4px 14px rgba(20,30,50,.06);
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --paper:#11151c; --surface:#1a2029; --sunken:#151a22; --ink:#e7eaf0; --muted:#9ba5b6; --line:#2d3542;
+  --ai:#8eaeea; --ai-ink:#0f1520; --ai-soft:#22304a;
+  --c-apply:#e3a857; --c-apply-soft:#3a2c17; --c-exam:#8eaeea; --c-exam-soft:#22304a;
+  --c-ann:#6cc794; --c-ann-soft:#1b3326; --c-proc:#e58aa9; --c-proc-soft:#3a1e2a; --c-kyo:#b39cf0; --c-kyo-soft:#2b2440;
+  --warn:#f0b75a; --warn-soft:#382a12; --danger:#f19185; --danger-soft:#3b1d1a; --ok:#6cc794;
+  --shadow:0 1px 2px rgba(0,0,0,.3); color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --paper:#11151c; --surface:#1a2029; --sunken:#151a22; --ink:#e7eaf0; --muted:#9ba5b6; --line:#2d3542;
+  --ai:#8eaeea; --ai-ink:#0f1520; --ai-soft:#22304a;
+  --c-apply:#e3a857; --c-apply-soft:#3a2c17; --c-exam:#8eaeea; --c-exam-soft:#22304a;
+  --c-ann:#6cc794; --c-ann-soft:#1b3326; --c-proc:#e58aa9; --c-proc-soft:#3a1e2a; --c-kyo:#b39cf0; --c-kyo-soft:#2b2440;
+  --warn:#f0b75a; --warn-soft:#382a12; --danger:#f19185; --danger-soft:#3b1d1a; --ok:#6cc794;
+  --shadow:0 1px 2px rgba(0,0,0,.3); color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--paper);color:var(--ink);font:15px/1.65 var(--f-body);-webkit-text-size-adjust:100%;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 48px}
+[hidden]{display:none!important}
+button,input,select,textarea{font:inherit;color:inherit}
+h1,h2,h3{font-family:var(--f-head);font-weight:700;text-wrap:balance;margin:0;line-height:1.35}
+a{color:var(--ai)}
+.num{font-family:var(--f-num);font-variant-numeric:tabular-nums}
+.wrap{max-width:1180px;margin:0 auto}
+:focus-visible{outline:2px solid var(--ai);outline-offset:2px;border-radius:4px}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+
+/* header */
+.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--paper);border-bottom:1px solid var(--line);margin-inline:calc(-1*max(16px,env(safe-area-inset-left,0px)));padding:10px max(16px,env(safe-area-inset-left,0px))}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:30;background:var(--paper)}
+.top .wrap{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.brand{display:flex;align-items:baseline;gap:10px;margin-right:auto;min-width:0}
+.brand h1{font-size:19px;letter-spacing:.04em}
+.brand .yr{font-family:var(--f-num);font-size:12px;color:var(--muted);letter-spacing:.08em}
+.who{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:14px}
+.who b{font-weight:700}
+.save{font-size:12px;color:var(--muted);white-space:nowrap}
+.save.err{color:var(--danger)}
+.okmsg{color:var(--ok);font-weight:700}
+#submitState .w{display:block}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--line);background:var(--surface);border-radius:var(--r);padding:7px 14px;cursor:pointer;line-height:1.3;font-size:14px;white-space:nowrap}
+.btn:hover{border-color:var(--ai)}
+.btn.primary{background:var(--ai);color:var(--ai-ink);border-color:var(--ai);font-weight:700}
+.btn.sm{padding:4px 10px;font-size:13px}
+.btn.ghost{background:transparent}
+.btn.danger{color:var(--danger)}
+.btn[disabled]{opacity:.5;cursor:default}
+.notice{background:var(--warn-soft);color:var(--ink);border:1px solid color-mix(in srgb,var(--warn) 35%,transparent);border-radius:var(--r);padding:8px 12px;font-size:13px;margin:12px 0}
+.notice.info{background:var(--ai-soft);border-color:color-mix(in srgb,var(--ai) 30%,transparent)}
+
+/* tabs */
+.tabs{display:flex;gap:4px;overflow-x:auto;margin:14px 0 16px;border-bottom:1px solid var(--line);scrollbar-width:thin}
+.tab{border:0;background:none;padding:10px 14px;border-bottom:3px solid transparent;cursor:pointer;white-space:nowrap;color:var(--muted);font-weight:700}
+.tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--ai)}
+.tab .cnt{font-family:var(--f-num);font-size:12px;background:var(--sunken);border-radius:10px;padding:0 7px;margin-left:4px;color:var(--muted)}
+
+/* login */
+.login{max-width:440px;margin:7vh auto 0;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:28px 24px}
+.login h1{font-size:26px;letter-spacing:.05em}
+.login .sub{color:var(--muted);font-size:13px;margin:4px 0 18px}
+.stamp{display:inline-block;border:2px solid var(--c-proc);color:var(--c-proc);font-family:var(--f-head);font-weight:700;font-size:12px;padding:1px 8px;border-radius:4px;transform:rotate(-4deg);margin-left:8px;vertical-align:middle}
+.field{display:grid;gap:4px;margin-bottom:12px}
+.field label{font-size:13px;color:var(--muted);font-weight:700}
+.inp{width:100%;border:1px solid var(--line);background:var(--surface);border-radius:var(--r);padding:9px 11px}
+.inp:focus{border-color:var(--ai);outline:none}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.err-msg{color:var(--danger);font-size:13px;min-height:1.4em}
+.linkbtn{background:none;border:0;color:var(--ai);cursor:pointer;padding:0;text-decoration:underline;font-size:13px}
+
+/* summary strip */
+.strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:14px}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;min-width:0}
+.tile .k{font-size:12px;color:var(--muted);font-weight:700;letter-spacing:.04em}
+.tile .v{font-family:var(--f-num);font-size:22px;font-weight:700;line-height:1.3}
+.tile .s{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:720px){.strip{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* plan */
+.plan{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:20px;align-items:start}
+@media (max-width:960px){.plan{grid-template-columns:minmax(0,1fr)}}
+.sec-h{display:flex;align-items:baseline;gap:10px;margin:6px 0 10px;flex-wrap:wrap}
+.sec-h h2{font-size:18px}
+.sec-h .hint{font-size:12px;color:var(--muted)}
+.pick{display:grid;grid-template-columns:76px minmax(0,1fr);gap:12px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px;margin-bottom:10px}
+.pick.ng{opacity:.62}
+.dateblk{text-align:center;border-right:1px dashed var(--line);padding-right:10px}
+.dateblk .m{font-family:var(--f-num);font-size:12px;color:var(--muted)}
+.dateblk .d{font-family:var(--f-num);font-size:26px;font-weight:700;line-height:1.1;color:var(--c-exam)}
+.dateblk .wd{font-size:12px;color:var(--muted)}
+.dateblk.kyo .d{font-size:17px;color:var(--c-kyo);padding-top:6px}
+.pick .u{font-family:var(--f-head);font-weight:700;font-size:17px}
+.pick .fg{color:var(--muted);font-size:14px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:4px 0}
+.chip{font-size:12px;border-radius:999px;padding:1px 9px;border:1px solid var(--line);background:var(--sunken);white-space:nowrap}
+.chip.k-一般{background:var(--c-exam-soft);border-color:transparent;color:var(--c-exam)}
+.chip.k-共テ併用{background:var(--c-exam-soft);border-color:var(--c-kyo);color:var(--c-exam)}
+.chip.k-共テ利用{background:var(--c-kyo-soft);border-color:transparent;color:var(--c-kyo)}
+.chip.k-国公立{background:var(--c-ann-soft);border-color:transparent;color:var(--c-ann)}
+.chip.conf{background:var(--warn-soft);color:var(--warn);border-color:transparent}
+.dates{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px;margin:6px 0}
+.dates span{white-space:nowrap}
+.dates i{font-style:normal;font-weight:700;margin-right:4px}
+.t-apply i{color:var(--c-apply)} .t-ann i{color:var(--c-ann)} .t-proc i{color:var(--c-proc)} .t-exam i{color:var(--c-exam)}
+.ctrls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px}
+.ctrls select,.ctrls input{border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:4px 6px;font-size:13px;max-width:100%}
+.ctrls .memo{flex:1 1 160px;min-width:0}
+.warns{display:grid;gap:4px;margin-top:8px}
+.w{font-size:12.5px;border-radius:6px;padding:4px 8px;background:var(--warn-soft);color:var(--warn)}
+.w.bad{background:var(--danger-soft);color:var(--danger)}
+.note{font-size:12px;color:var(--muted);margin-top:4px}
+.empty{background:var(--surface);border:1px dashed var(--line);border-radius:var(--r);padding:22px;text-align:center;color:var(--muted)}
+.empty b{color:var(--ink)}
+.side{position:sticky;top:calc(env(safe-area-inset-top,0px) + 70px);display:grid;gap:14px}
+@media (max-width:960px){.side{position:static}}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px}
+.panel h3{font-size:15px;margin-bottom:8px}
+.legend{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12px;color:var(--muted);margin-bottom:6px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;vertical-align:1px}
+.d-apply{background:var(--c-apply)} .d-exam{background:var(--c-exam)} .d-ann{background:var(--c-ann)} .d-proc{background:var(--c-proc)} .d-kyo{background:var(--c-kyo)}
+.export{display:grid;gap:8px}
+.export .opts{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:13px}
+
+/* calendars */
+.month{margin-bottom:12px}
+.month h4{font-family:var(--f-head);font-size:14px;margin:0 0 4px}
+.cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:2px}
+.cal .hd{font-size:11px;text-align:center;color:var(--muted)}
+.cal .hd.sun,.cal .day.sun .n{color:var(--danger)} .cal .hd.sat,.cal .day.sat .n{color:var(--ai)}
+.cal .day{min-height:40px;border-radius:5px;background:var(--sunken);padding:2px 3px;font-size:11px;position:relative}
+.cal .day.pad{background:transparent}
+.cal .day .n{font-family:var(--f-num);font-size:11px}
+.cal .day .dots{display:flex;flex-wrap:wrap;gap:2px;margin-top:1px}
+.cal .day .dots .dot{width:7px;height:7px;margin:0}
+.cal .day.today{outline:2px solid var(--ai)}
+.cal .day.kyo{background:var(--c-kyo-soft)}
+.bigcal .cal .day{min-height:64px;cursor:pointer;border:1px solid transparent;text-align:left;width:100%;display:block}
+.bigcal .cal .day:hover{border-color:var(--ai)}
+.bigcal .cal .day[aria-pressed="true"]{border-color:var(--ai);box-shadow:inset 0 0 0 1px var(--ai)}
+.bigcal .cal .day .c{font-family:var(--f-num);font-weight:700;font-size:15px;display:block;margin-top:2px}
+.bigcal .cal .day .mine{position:absolute;right:3px;top:3px;font-size:10px;background:var(--c-exam);color:var(--ai-ink);border-radius:4px;padding:0 4px}
+.bigcal .months{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+.heat0{background:var(--sunken)!important}
+.heat1{background:color-mix(in srgb,var(--ai) 10%,var(--surface))!important}
+.heat2{background:color-mix(in srgb,var(--ai) 22%,var(--surface))!important}
+.heat3{background:color-mix(in srgb,var(--ai) 36%,var(--surface))!important}
+.heat4{background:color-mix(in srgb,var(--ai) 52%,var(--surface))!important}
+
+/* search */
+.filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+.fchip{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 12px;cursor:pointer;font-size:13px}
+.fchip[aria-pressed="true"]{background:var(--ai);border-color:var(--ai);color:var(--ai-ink);font-weight:700}
+.search{flex:1 1 220px;min-width:0}
+.unis{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.uni{border:1px solid var(--line);background:var(--surface);border-radius:var(--r);padding:10px 12px;cursor:pointer;text-align:left}
+.uni:hover{border-color:var(--ai)}
+.uni .nm{font-family:var(--f-head);font-weight:700;font-size:16px}
+.uni .meta{font-size:12px;color:var(--muted)}
+.uni .mine{font-size:11px;color:var(--c-exam);font-weight:700}
+.grp-h{font-size:12px;letter-spacing:.08em;color:var(--muted);font-weight:700;margin:16px 0 6px;grid-column:1/-1}
+details.fac{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);margin-bottom:8px}
+details.fac>summary{cursor:pointer;padding:10px 14px;font-weight:700;list-style:none;display:flex;gap:8px;align-items:center}
+details.fac>summary::-webkit-details-marker{display:none}
+details.fac>summary::before{content:"▸";color:var(--muted);transition:transform .15s}
+details.fac[open]>summary::before{transform:rotate(90deg)}
+details.fac>summary .c{font-family:var(--f-num);font-size:12px;color:var(--muted);font-weight:400}
+.tbl-wrap{overflow-x:auto;border-top:1px solid var(--line)}
+table.ex{border-collapse:collapse;width:100%;font-size:13px;min-width:720px}
+table.ex th{background:var(--sunken);text-align:left;font-size:12px;color:var(--muted);font-weight:700;padding:6px 8px;white-space:nowrap}
+table.ex td{border-top:1px solid var(--line);padding:6px 8px;vertical-align:top}
+table.ex td.d{white-space:nowrap;font-family:var(--f-num)}
+table.ex tr.added td{background:var(--c-exam-soft)}
+.uhead{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px}
+.uhead h2{font-size:22px}
+.kyo-days{font-size:13px;color:var(--muted)}
+
+/* profile */
+.pf{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+@media (max-width:820px){.pf{grid-template-columns:minmax(0,1fr)}}
+.pf .panel h3{font-size:16px}
+.kt{width:100%;border-collapse:collapse;font-size:14px}
+.kt th,.kt td{padding:5px 6px;border-bottom:1px solid var(--line);text-align:left}
+.kt th{font-size:12px;color:var(--muted)}
+.kt input{width:100%;max-width:90px;border:1px solid var(--line);border-radius:6px;padding:4px 6px;background:var(--surface);font-family:var(--f-num)}
+.kt input.nm{max-width:140px;font-family:var(--f-body)}
+.kt tfoot td{font-weight:700;border-bottom:0}
+.bar{height:8px;background:var(--sunken);border-radius:4px;overflow:hidden;margin-top:6px}
+.bar>i{display:block;height:100%;background:var(--ai)}
+
+/* teacher */
+.ttable{border-collapse:collapse;width:100%;font-size:13px;min-width:860px;background:var(--surface)}
+.ttable th{position:sticky;top:0;background:var(--sunken);font-size:12px;color:var(--muted);text-align:left;padding:7px 8px;white-space:nowrap}
+.ttable td{border-top:1px solid var(--line);padding:6px 8px;white-space:nowrap}
+.ttable tr:hover td{background:var(--ai-soft)}
+.tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+.drawer{position:fixed;inset:0;background:rgba(10,15,25,.45);z-index:50;display:flex;justify-content:flex-end}
+.drawer .in{width:min(760px,100%);height:100%;overflow:auto;background:var(--paper);padding:18px max(16px,env(safe-area-inset-right,0px)) 40px 18px}
+.daylist details{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);margin-bottom:6px}
+.daylist summary{cursor:pointer;padding:8px 12px;display:flex;gap:10px;align-items:center}
+.daylist .names{padding:4px 12px 10px;font-size:13px}
+
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:9px 16px;border-radius:8px;font-size:14px;z-index:90;box-shadow:var(--shadow);max-width:calc(100% - 32px)}
+
+/* print */
+#print{display:none}
+@media print{
+  @page{size:A4;margin:12mm 11mm}
+  body{background:#fff;color:#111;padding:0;font-size:10.5pt}
+  body::before{display:none}
+  #app,.toast,.drawer{display:none!important}
+  #print{display:block}
+  .pp{page-break-after:always;break-after:page}
+  .pp:last-child{page-break-after:auto;break-after:auto}
+  .pp h1{font-size:16pt;margin-bottom:2mm}
+  .pp .meta{display:flex;justify-content:space-between;font-size:9.5pt;border-bottom:1.5pt solid #24498c;padding-bottom:2mm;margin-bottom:3mm}
+  .pp .prof{display:grid;grid-template-columns:1fr 1fr;gap:2mm 6mm;font-size:9pt;margin-bottom:3mm;border:0.5pt solid #bbb;padding:2mm 3mm;border-radius:2mm}
+  .pp table{width:100%;border-collapse:collapse;font-size:8.6pt}
+  .pp th{background:#e8edf6;text-align:left;padding:1.2mm 1.5mm;border:0.4pt solid #b9c3d3;white-space:nowrap}
+  .pp td{border:0.4pt solid #c9d0dc;padding:1.2mm 1.5mm;vertical-align:top}
+  .pp td.d,.pp td.nw{white-space:nowrap}
+  .pp h2{font-size:12pt;margin:4mm 0 2mm}
+  .pp .pm{display:grid;grid-template-columns:repeat(2,1fr);gap:4mm}
+  .pp .pcal{width:100%;border-collapse:collapse;table-layout:fixed}
+  .pp .pcal th{font-size:7.5pt;text-align:center;padding:0.6mm}
+  .pp .pcal.big td{height:24mm;font-size:7.6pt}
+  .pp .pcal td{height:15mm;font-size:6.6pt;line-height:1.25;vertical-align:top;padding:0.6mm 0.8mm;border:0.4pt solid #c9d0dc;overflow:hidden}
+  .pp .pcal td .n{font-weight:700;font-size:7.5pt}
+  .pp .pcal td.o{background:#f3f3f3}
+  .pp .ev{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pp .e-apply{color:#8a4f00} .pp .e-exam{color:#1d3c78;font-weight:700} .pp .e-ann{color:#1f6a3f} .pp .e-proc{color:#9b2c52} .pp .e-kyo{color:#5a3aa0;font-weight:700}
+  .pp .foot{font-size:7.5pt;color:#555;margin-top:2mm}
+}
+</style>
+</head>
+<body>
+<div id="app"><div class="login"><h1>受験校プランナー</h1><p class="sub">大学データを読み込んでいます…</p></div></div>
+<div id="print"></div>
+<div id="toast" class="toast" hidden></div>
+
+<script>
+'use strict';
+/* ============================================================
+   基本ユーティリティ
+   ============================================================ */
+const C = window.CONFIG;
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const WD = '日月火水木金土';
+const pad2 = n => String(n).padStart(2, '0');
+const nowStr = () => { const d = new Date(); return `${isoOf(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+const isoOf = dt => `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
+const today = isoOf(new Date());
+function dOf(iso) { const [y, m, d] = iso.split('-').map(Number); return new Date(y, m - 1, d); }
+function fmt(iso, wd = true) { if (!iso) return ''; const dt = dOf(iso); return `${dt.getMonth() + 1}/${dt.getDate()}` + (wd ? `(${WD[dt.getDay()]})` : ''); }
+function addDays(iso, n) { const dt = dOf(iso); dt.setDate(dt.getDate() + n); return isoOf(dt); }
+function normDate(v) {
+  if (v === '' || v == null) return '';
+  if (typeof v === 'number') { const p = XLSX.SSF.parse_date_code(v); return p ? `${p.y}-${pad2(p.m)}-${pad2(p.d)}` : ''; }
+  if (v instanceof Date) return isoOf(v);
+  const m = String(v).match(/(\d{4})\D(\d{1,2})\D(\d{1,2})/);
+  return m ? `${m[1]}-${pad2(m[2])}-${pad2(m[3])}` : '';
+}
+function strHash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(16).padStart(8, '0'); }
+const normName = s => String(s || '').replace(/[\s　]+/g, '');
+let toastTimer;
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 2600); }
+function download(name, data, type) {
+  const blob = data instanceof Blob ? data : new Blob([data], { type });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+function csv(rows) {
+  return '\ufeff' + rows.map(r => r.map(v => { v = String(v ?? ''); return /[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; }).join(',')).join('\r\n');
+}
+
+/* ============================================================
+   大学データ（data/master.xlsx）
+   ============================================================ */
+const M = { rows: [], byId: {}, unis: [], uniInfo: {}, groups: [], settings: {}, loaded: false, year: '' };
+const KINDS = ['一般', '共テ併用', '共テ利用', '国公立'];
+function ingestWorkbook(wb) {
+  const sh = wb.Sheets['入試日程'] || wb.Sheets[wb.SheetNames[0]];
+  const raw = XLSX.utils.sheet_to_json(sh, { defval: '', raw: true });
+  const rows = [], byId = {};
+  for (const r of raw) {
+    const x = {
+      id: String(r['ID'] || '').trim(), grp: String(r['区分'] || '').trim(), uni: String(r['大学'] || '').trim(),
+      fac: String(r['学部'] || '').trim(), dep: String(r['学科'] || '').trim(), met: String(r['方式'] || '').trim(),
+      kind: String(r['種別'] || '一般').trim(), date: normDate(r['試験日']), open: normDate(r['出願開始']),
+      close: normDate(r['出願締切']), ann: normDate(r['合格発表']), proc: normDate(r['手続締切']),
+      rank: String(r['偏差値帯'] || '').trim(), note: String(r['備考'] || '').trim(), conf: String(r['確度'] || '').trim(), src: String(r['出典'] || '').trim()
+    };
+    if (!x.uni) continue;
+    if (!x.id) x.id = 'x' + strHash([x.uni, x.fac, x.dep, x.met, x.kind, x.date].join('|'));
+    while (byId[x.id]) x.id += '_';
+    byId[x.id] = x; rows.push(x);
+  }
+  const uniInfo = {}, unis = [], groups = [];
+  const ush = wb.Sheets['大学'];
+  if (ush) for (const r of XLSX.utils.sheet_to_json(ush, { defval: '' })) {
+    const u = String(r['大学'] || '').trim(); if (!u) continue;
+    uniInfo[u] = { disp: String(r['表示名'] || u), grp: String(r['区分'] || ''), kokushi: String(r['国私'] || '') };
+    unis.push(u); if (r['区分'] && !groups.includes(r['区分'])) groups.push(String(r['区分']));
+  }
+  for (const x of rows) {
+    if (!uniInfo[x.uni]) { uniInfo[x.uni] = { disp: x.uni, grp: x.grp || 'その他', kokushi: '' }; unis.push(x.uni); }
+    if (!x.grp) x.grp = uniInfo[x.uni].grp;
+    const g = uniInfo[x.uni].grp; if (g && !groups.includes(g)) groups.push(g);
+  }
+  const st = {}; const ssh = wb.Sheets['設定'];
+  if (ssh) for (const r of XLSX.utils.sheet_to_json(ssh, { defval: '', raw: true })) st[String(r['項目'])] = r['値'];
+  const count = {}; rows.forEach(x => count[x.uni] = (count[x.uni] || 0) + 1);
+  Object.assign(M, {
+    rows, byId, uniInfo, groups, loaded: true, unis: unis.filter(u => count[u]),
+    settings: {
+      year: String(st['年度'] || ''), kyo: [normDate(st['共通テスト1日目']), normDate(st['共通テスト2日目'])].filter(Boolean),
+      calStart: normDate(st['カレンダー開始']) || '', calEnd: normDate(st['カレンダー終了']) || '',
+      updated: normDate(st['データ更新日']) || '', notice: String(st['注意文'] || '')
+    }
+  });
+  M.uniCount = count;
+}
+async function loadMaster() {
+  const res = await fetch(C.MASTER_URL, { cache: 'no-cache' });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  ingestWorkbook(XLSX.read(await res.arrayBuffer(), { type: 'array' }));
+}
+const uniName = u => (M.uniInfo[u] && M.uniInfo[u].disp) || u;
+const facName = f => !f ? '' : (/(学部|学院|学群|学環|類|部)$/.test(f) ? f : f + '学部');
+const depName = d => !d ? '' : (/(学科|専攻|コース|課程|系|類|プログラム|学環|専修)$/.test(d) ? d : d + '学科');
+
+/* ============================================================
+   この端末への保存と、提出・復元コード
+   ============================================================ */
+const ME_KEY = 'jukenko_planner_me_v2';
+function loadMe() { try { const s = JSON.parse(localStorage.getItem(ME_KEY)); return s && s.cls ? s : null; } catch (e) { return null; } }
+function storeMe() { try { localStorage.setItem(ME_KEY, JSON.stringify(STATE.me)); return true; } catch (e) { return false; } }
+function b64u(bytes) { let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+function unb64u(str) { str = str.replace(/-/g, '+').replace(/_/g, '/'); while (str.length % 4) str += '='; const b = atob(str); const u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; }
+function pruneEmpty(o) {
+  const j = JSON.stringify(o, (k, v) => (k !== '' && (v === '' || v === null || v === undefined || (v && typeof v === 'object' && !Array.isArray(v) && !Object.keys(v).length))) ? undefined : v);
+  return j ? JSON.parse(j) : {};
+}
+function compactMe(me) {
+  return {
+    v: 1, y: M.settings.year, c: me.cls, n: me.no, m: me.name, t: me.updated || '', p: pruneEmpty(me.profile || {}),
+    k: (me.picks || []).map(p => {
+      const base = M.byId[p.id]; const r = [p.id, Math.max(0, PREFS.indexOf(p.pref)), Math.max(0, STATUSES.indexOf(p.status))];
+      const changed = (p.date || '') !== ((base && base.date) || (p.snap && p.snap.date) || '');
+      if (changed || p.memo) r.push(changed ? (p.date || '') : 0);
+      if (p.memo) r.push(p.memo);
+      return r;
+    })
+  };
+}
+async function encodeCode(me) {
+  const bytes = new TextEncoder().encode(JSON.stringify(compactMe(me)));
+  if (window.CompressionStream) {
+    try { const st = new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate-raw')); return 'JKP1.' + b64u(new Uint8Array(await new Response(st).arrayBuffer())); } catch (e) { }
+  }
+  return 'JKP0.' + b64u(bytes);
+}
+const CODE_RE = /JKP[01]\.[A-Za-z0-9_-]{16,}/g;
+async function decodeCode(code) {
+  const m = String(code).match(/JKP([01])\.([A-Za-z0-9_-]+)/); if (!m) throw new Error('format');
+  let bytes = unb64u(m[2]);
+  if (m[1] === '1') { const st = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw')); bytes = new Uint8Array(await new Response(st).arrayBuffer()); }
+  const o = JSON.parse(new TextDecoder().decode(bytes));
+  const pf = o.p || {}; pf.ext = [0, 1].map(i => (pf.ext && pf.ext[i]) || {});
+  return {
+    cls: String(o.c), no: String(o.n), name: String(o.m || ''), updated: o.t || '', year: o.y || '', profile: pf,
+    picks: (o.k || []).map(r => {
+      const id = r[0]; const base = M.byId[id];
+      return { id, date: typeof r[3] === 'string' ? r[3] : (base ? base.date : ''), pref: PREFS[r[1]] || '未定', status: STATUSES[r[2]] || '検討中', memo: r[4] || '',
+        snap: base ? snapOf(base) : { uni: '（大学データにない入試）', fac: '', dep: '', met: 'ID ' + id, kind: '' } };
+    })
+  };
+}
+let codeTimer = null;
+function refreshCode() {
+  clearTimeout(codeTimer);
+  codeTimer = setTimeout(async () => {
+    if (!STATE.me) return;
+    STATE.code = await encodeCode(STATE.me);
+    const box = $('#codeBox'); if (box) box.value = STATE.code;
+    const st = $('#submitState'); if (st) st.innerHTML = submitStateHTML();
+  }, 250);
+}
+function formUrl(me, code) {
+  if (!C.FORM_URL) return '';
+  try {
+    const u = new URL(C.FORM_URL); const map = { CLASS: me.cls, NO: me.no, NAME: me.name, CODE: code };
+    for (const [k, v] of [...u.searchParams]) if (map[v.trim()] !== undefined) u.searchParams.set(k, map[v.trim()]);
+    return u.toString();
+  } catch (e) { return ''; }
+}
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; }
+  catch (e) { const ta = $('#codeBox'); if (ta) { ta.focus(); ta.select(); } return false; }
+}
+
+/* ============================================================
+   状態
+   ============================================================ */
+const STATE = { view: 'login', tab: 'plan', me: null, code: '', saveState: '', newConfirm: false,
+  search: { grp: '', q: '', uni: '', kinds: new Set(KINDS.filter(k => k !== '共テ利用')), fq: '' },
+  cal: { grps: new Set(), q: '', day: '', kinds: new Set(['一般', '共テ併用', '国公立']) },
+  kyo: { grp: '', uni: '', fq: '' },
+  icsTypes: new Set(['exam', 'apply', 'ann', 'proc']),
+  teacher: { students: [], cls: '', q: '', sel: new Set(), tab: 'list', detail: null, conv: null, imp: '' }
+};
+const PREFS = ['未定', '第1志望', '第2志望', '第3志望', 'チャレンジ', '実力相応', '安全校'];
+const PREF_RANK = { '第1志望': 1, '第2志望': 2, 'チャレンジ': 2.5, '第3志望': 3, '実力相応': 4, '安全校': 5, '未定': 9 };
+const STATUSES = ['検討中', '出願予定', '出願済', '受験済', '合格', '不合格', '取りやめ'];
+const EV = { apply: '出願締切', exam: '試験', ann: '合格発表', proc: '手続締切' };
+
+function exOf(p) {
+  const base = M.byId[p.id] || p.snap || {};
+  return Object.assign({}, base, { date: p.date !== undefined && p.date !== null ? p.date : base.date });
+}
+function snapOf(x) { const { src, ...r } = x; return r; }
+function eventsOf(p) {
+  const x = exOf(p); const evs = [];
+  if (x.close) evs.push({ type: 'apply', date: x.close, x, p });
+  if (x.date) evs.push({ type: 'exam', date: x.date, x, p });
+  if (x.ann) evs.push({ type: 'ann', date: x.ann, x, p });
+  if (x.proc) evs.push({ type: 'proc', date: x.proc, x, p });
+  return evs;
+}
+const activePicks = (me = STATE.me) => (me.picks || []).filter(p => !['取りやめ'].includes(p.status));
+function label(x, short = false) {
+  const parts = [uniName(x.uni), facName(x.fac)];
+  if (!short && x.dep) parts.push(depName(x.dep));
+  return parts.filter(Boolean).join(' ');
+}
+
+/* ============================================================
+   保存（この端末に自動保存）
+   ============================================================ */
+function touch() {
+  if (!STATE.me) return;
+  STATE.me.updated = nowStr();
+  STATE.saveState = storeMe() ? 'saved' : 'error';
+  renderSave(); refreshCode();
+}
+function renderSave() {
+  const el = $('#save'); if (!el) return;
+  el.textContent = STATE.saveState === 'error' ? 'この端末に保存できません（復元コードを控えてください）' : 'この端末に自動保存';
+  el.className = 'save' + (STATE.saveState === 'error' ? ' err' : '');
+}
+function submitStateHTML() {
+  const me = STATE.me; if (!me) return '';
+  if (!me.submittedAt) return `<span class="w">まだ提出していません</span>`;
+  if (me.submittedAt !== me.updated) return `<span class="w">${esc(me.submittedAt.slice(5))} に提出後、内容を変えています。もう一度提出してください</span>`;
+  return `<span class="okmsg">${esc(me.submittedAt.slice(5))} 提出済み（その後の変更なし）</span>`;
+}
+
+/* ============================================================
+   画面：ログイン
+   ============================================================ */
+function render() {
+  const app = $('#app');
+  if (!M.loaded) return;
+  if (STATE.view === 'login') app.innerHTML = loginHTML();
+  else if (STATE.view === 'student') app.innerHTML = studentHTML();
+  else if (STATE.view === 'teacher') app.innerHTML = teacherHTML();
+  afterRender();
+  if (STATE.view === 'student') refreshCode();
+}
+function loginHTML() {
+  const saved = loadMe();
+  const clsInput = C.CLASSES && C.CLASSES.length
+    ? `<select id="l-cls" class="inp"><option value="">選択</option>${C.CLASSES.map(c => `<option>${esc(c)}</option>`).join('')}</select>`
+    : `<input id="l-cls" class="inp" placeholder="例：3-1" autocomplete="off">`;
+  return `<form class="login" id="loginForm" autocomplete="off">
+    <h1>受験校プランナー<span class="stamp">${esc(M.settings.year || '')}年度入試</span></h1>
+    <p class="sub">${esc(C.SCHOOL || '')} 受験する大学・方式を選んで、日程表とカレンダーを作ります。</p>
+    ${saved ? `<div class="notice info" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="flex:1 1 180px">この端末に <b>${esc(saved.cls)} ${esc(saved.no)}番 ${esc(saved.name)}</b> さんの入力があります。</span><button type="button" class="btn primary" data-act="resume">続きから</button></div>` : ''}
+    <div class="row2"><div class="field"><label for="l-cls">組</label>${clsInput}</div>
+    <div class="field"><label for="l-no">番号</label><input id="l-no" class="inp num" inputmode="numeric" placeholder="例：12"></div></div>
+    <div class="field"><label for="l-name">氏名</label><input id="l-name" class="inp" placeholder="例：須藤 太郎"></div>
+    <div class="err-msg" id="l-err"></div>
+    <button class="btn${saved ? '' : ' primary'}" style="width:100%" id="l-go">${saved ? '新しく始める' : 'はじめる'}</button>
+    <details class="restore" style="margin-top:14px"><summary>復元コードから再開する</summary>
+      <p class="note">別の端末で入力した人や、入力が消えた人は、控えておいた復元コード（JKP… で始まる文字）を貼ってください。</p>
+      <textarea id="r-code" class="inp" rows="3" placeholder="JKP1.…"></textarea>
+      <button type="button" class="btn" style="margin-top:6px" data-act="restore">復元する</button></details>
+    <p class="note">入力はこの端末に自動で保存されます。iPadでは共有ボタンから「ホーム画面に追加」して開くと、入力が消えにくくなります。</p>
+    <p style="text-align:right;margin:10px 0 0"><button type="button" class="linkbtn" data-act="tlogin">教員の方はこちら</button></p>
+  </form>`;
+}
+function startStudent(me, msg) {
+  me.profile = me.profile || {}; me.picks = me.picks || [];
+  STATE.me = me; STATE.view = 'student'; STATE.tab = me.picks.length ? 'plan' : 'uni'; STATE.newConfirm = false;
+  STATE.saveState = storeMe() ? 'saved' : 'error';
+  render(); window.scrollTo({ top: 0 }); if (msg) toast(msg);
+}
+function doLogin(e) {
+  e.preventDefault();
+  const cls = $('#l-cls').value.trim(), no = String(parseInt($('#l-no').value, 10) || '').trim(), name = $('#l-name').value.trim();
+  const err = $('#l-err');
+  if (!cls || !no || !name) { err.textContent = '組・番号・氏名を入れてください。'; return; }
+  const saved = loadMe();
+  if (saved && saved.cls === cls && saved.no === no) { saved.name = name; startStudent(saved, '続きから開きました'); return; }
+  if (saved && !STATE.newConfirm) {
+    STATE.newConfirm = true;
+    err.textContent = `この端末の ${saved.name} さんの入力は消えます。必要なら先に「続きから」で復元コードを控えてください。よければもう一度「新しく始める」を押してください。`;
+    return;
+  }
+  startStudent({ cls, no, name, profile: {}, picks: [], updated: nowStr() }, '受験校を追加していきましょう');
+}
+
+/* ============================================================
+   画面：生徒
+   ============================================================ */
+function headerHTML(nameLine, right) {
+  return `<header class="top"><div class="wrap"><div class="brand"><h1>受験校プランナー</h1><span class="yr">${esc(M.settings.year)}年度入試</span></div>
+    <div class="who">${nameLine}${right}</div></div></header>`;
+}
+function studentHTML() {
+  const me = STATE.me;
+  const tabs = [['plan', '受験予定', activePicks().length], ['uni', '大学から追加'], ['cal', 'カレンダーから追加'], ['kyo', '共テ利用'], ['profile', '進路データ']];
+  return headerHTML(`<span><b>${esc(me.cls)}</b> ${esc(me.no)}番 <b>${esc(me.name)}</b></span>`,
+    `<span class="save" id="save"></span><button class="btn sm primary" data-act="submit">先生に提出</button><button class="btn sm ghost" data-act="logout">終了</button>`) +
+    `<div class="wrap">${M.settings.notice ? `<div class="notice info">${esc(M.settings.notice)}${M.settings.updated ? `（データ更新：${fmt(M.settings.updated, false)}）` : ''}</div>` : ''}
+    ${summaryHTML(me)}
+    <nav class="tabs" role="tablist">${tabs.map(([k, l, c]) => `<button class="tab" role="tab" aria-selected="${STATE.tab === k}" data-tab="${k}">${l}${c !== undefined ? `<span class="cnt">${c}</span>` : ''}</button>`).join('')}</nav>
+    <main id="tabBody">${tabBody()}</main></div>`;
+}
+function summaryHTML(me) {
+  const ps = activePicks(me); const evs = ps.flatMap(eventsOf);
+  const fut = t => evs.filter(e => e.type === t && e.date >= today).sort((a, b) => a.date.localeCompare(b.date));
+  const nApply = fut('apply'), nExam = fut('exam');
+  const firstOf = list => list.length ? list.filter(e => e.date === list[0].date) : [];
+  const fa = firstOf(nApply), fe = firstOf(nExam);
+  const examDays = new Set(ps.map(p => exOf(p).date).filter(Boolean)).size;
+  const kyoN = ps.filter(p => exOf(p).kind === '共テ利用').length;
+  return `<section class="strip">
+    <div class="tile"><div class="k">受験予定</div><div class="v">${ps.length}<small style="font-size:13px"> 件</small></div><div class="s">うち共テ利用 ${kyoN}件</div></div>
+    <div class="tile"><div class="k">試験に行く日</div><div class="v">${examDays}<small style="font-size:13px"> 日</small></div><div class="s">${fe.length ? `次は ${fmt(fe[0].date)} ${esc(uniName(fe[0].x.uni))}` : '未定'}</div></div>
+    <div class="tile"><div class="k" style="color:var(--c-apply)">次の出願締切</div><div class="v">${fa.length ? fmt(fa[0].date) : '—'}</div><div class="s">${fa.length ? esc(fa.map(e => uniName(e.x.uni)).filter((v, i, a) => a.indexOf(v) === i).join('・')) + ` ${fa.length}件` : '登録なし'}</div></div>
+    <div class="tile"><div class="k">英検 / 共テ目標</div><div class="v" style="font-size:17px;padding-top:4px">${esc(me.profile.eiken || '未入力')}</div><div class="s">${kyoTotalText(me.profile)}</div></div>
+  </section>`;
+}
+function tabBody() {
+  switch (STATE.tab) {
+    case 'plan': return planHTML();
+    case 'uni': return uniTabHTML();
+    case 'cal': return calTabHTML();
+    case 'kyo': return kyoTabHTML();
+    case 'profile': return profileHTML();
+  }
+  return '';
+}
+
+/* ---------- 受験予定 ---------- */
+function warningsFor(p, ps) {
+  const x = exOf(p); const out = [];
+  if (x.kind !== '共テ利用' && x.date) {
+    const same = ps.filter(q => q !== p && exOf(q).kind !== '共テ利用' && exOf(q).date === x.date);
+    if (same.length) out.push({ bad: true, t: `${fmt(x.date)}に ${same.map(q => label(exOf(q), true)).join('、')} とも重なっています` });
+  }
+  if (x.close && x.close < today && ['検討中', '出願予定'].includes(p.status)) out.push({ bad: true, t: `出願締切（${fmt(x.close)}）を過ぎています` });
+  else if (x.close && ['検討中', '出願予定'].includes(p.status)) {
+    const dd = Math.round((dOf(x.close) - dOf(today)) / 864e5);
+    if (dd >= 0 && dd <= 7) out.push({ t: `出願締切まであと${dd}日（${fmt(x.close)}）` });
+  }
+  if (x.proc) {
+    const r = PREF_RANK[p.pref] ?? 9;
+    const hi = ps.filter(q => q !== p && (PREF_RANK[q.pref] ?? 9) < r && exOf(q).ann && exOf(q).ann > x.proc);
+    if (hi.length && r < 9) out.push({ t: `手続締切（${fmt(x.proc)}）が、${hi.map(q => `${label(exOf(q), true)}の発表（${fmt(exOf(q).ann)}）`).join('、')}より前です。入学金の扱いを確認しましょう` });
+  }
+  if (x.conf && !/確定/.test(x.conf)) out.push({ t: `日程は「${x.conf}」です。募集要項で確認してください` });
+  return out;
+}
+function pickHTML(p, ps) {
+  const x = exOf(p); const i = STATE.me.picks.indexOf(p);
+  const isKyo = x.kind === '共テ利用';
+  const db = isKyo ? `<div class="dateblk kyo"><div class="m">共テ</div><div class="d">利用</div><div class="wd">${M.settings.kyo.map(d => fmt(d, false)).join("・")}</div></div>`
+    : x.date ? `<div class="dateblk"><div class="m">${dOf(x.date).getMonth() + 1}月</div><div class="d">${dOf(x.date).getDate()}</div><div class="wd">${WD[dOf(x.date).getDay()]}曜</div></div>` : `<div class="dateblk"><div class="d">—</div><div class="wd">日程未定</div></div>`;
+  const ws = warningsFor(p, ps);
+  return `<article class="pick${p.status === '取りやめ' || p.status === '不合格' ? ' ng' : ''}" data-i="${i}">${db}<div style="min-width:0">
+    <div class="u">${esc(uniName(x.uni))} <span class="fg">${esc(facName(x.fac))} ${esc(depName(x.dep))}</span></div>
+    <div class="chips"><span class="chip k-${esc(x.kind)}">${esc(x.kind)}</span><span class="chip">${esc(x.met)}</span>${x.rank ? `<span class="chip">偏差値 ${esc(x.rank)}</span>` : ''}${x.conf && !/確定/.test(x.conf) ? `<span class="chip conf">${esc(x.conf)}</span>` : ''}</div>
+    <div class="dates"><span class="t-apply"><i>出願</i>${x.open ? fmt(x.open, false) + '〜' : ''}${x.close ? fmt(x.close) : '要確認'}</span><span class="t-ann"><i>発表</i>${x.ann ? fmt(x.ann) : '要確認'}</span><span class="t-proc"><i>手続</i>${x.proc ? fmt(x.proc) : '要確認'}</span></div>
+    ${x.note ? `<div class="note">${esc(x.note)}</div>` : ''}
+    <div class="ctrls">
+      <select data-f="pref" aria-label="志望度">${PREFS.map(v => `<option${p.pref === v ? ' selected' : ''}>${v}</option>`).join('')}</select>
+      <select data-f="status" aria-label="状況">${STATUSES.map(v => `<option${p.status === v ? ' selected' : ''}>${v}</option>`).join('')}</select>
+      ${isKyo ? '' : `<label style="font-size:12px;color:var(--muted)">試験日 <input type="date" data-f="date" value="${esc(x.date || '')}"></label>`}
+      <input class="memo" data-f="memo" placeholder="メモ（受験会場・併願の理由など）" value="${esc(p.memo || '')}">
+      <button class="btn sm ghost danger" data-act="del">削除</button>
+    </div>
+    ${ws.length ? `<div class="warns">${ws.map(w => `<div class="w${w.bad ? ' bad' : ''}">${esc(w.t)}</div>`).join('')}</div>` : ''}
+  </div></article>`;
+}
+function planHTML() {
+  const me = STATE.me; const ps = activePicks(me);
+  const all = me.picks.slice();
+  const gen = all.filter(p => exOf(p).kind !== '共テ利用').sort((a, b) => (exOf(a).date || '9').localeCompare(exOf(b).date || '9'));
+  const kyo = all.filter(p => exOf(p).kind === '共テ利用').sort((a, b) => (exOf(a).ann || '9').localeCompare(exOf(b).ann || '9'));
+  const list = all.length ? `
+    <div class="sec-h"><h2>個別試験のある入試</h2><span class="hint">試験日順。試験日を選べる方式は「試験日」を自分の受験日に変えてください。</span></div>
+    ${gen.length ? gen.map(p => pickHTML(p, ps)).join('') : `<div class="empty">まだありません。</div>`}
+    <div class="sec-h" style="margin-top:22px"><h2>共通テスト利用</h2><span class="hint">合格発表順</span></div>
+    ${kyo.length ? kyo.map(p => pickHTML(p, ps)).join('') : `<div class="empty">共テ利用はまだありません。<button class="linkbtn" data-tab="kyo">共テ利用タブ</button>から追加できます。</div>`}`
+    : `<div class="empty"><b>まだ受験校がありません。</b><br>「<button class="linkbtn" data-tab="uni">大学から追加</button>」か「<button class="linkbtn" data-tab="cal">カレンダーから追加</button>」で選んでください。</div>`;
+  return `<div class="plan"><div style="min-width:0">${list}</div>
+    <aside class="side">
+      <div class="panel export" id="submitPanel"><h3>先生に提出</h3>
+        <div id="submitState" style="font-size:13px">${submitStateHTML()}</div>
+        <button class="btn primary" data-act="submit">${C.FORM_URL ? 'フォームで提出する' : '提出用コードをコピー'}</button>
+        <p class="note" style="margin:0">${C.FORM_URL ? 'フォームが開いて入力済みになっています。最後にフォームの「送信」を押してください。' : 'コピーしたコードを、先生の指示した場所（Classroomなど）に貼って提出してください。'}</p>
+        <details><summary style="cursor:pointer;font-size:13px">復元コード（バックアップ）</summary>
+          <textarea id="codeBox" class="inp num" rows="4" readonly style="font-size:11px;margin-top:6px;word-break:break-all">${esc(STATE.code)}</textarea>
+          <button class="btn sm" data-act="copycode" style="margin-top:6px">コピー</button>
+          <p class="note">このコードをメモやスクショで残しておくと、別の端末や入力が消えたときに、最初の画面の「復元コードから再開」で元に戻せます。</p></details>
+      </div>
+      <div class="panel export"><h3>書き出す</h3>
+        <button class="btn primary" data-act="pdf">日程表をPDFに（印刷画面）</button>
+        <p class="note" style="margin:0">印刷画面で「PDFに保存」を選ぶと、一覧表と1〜3月のカレンダーがPDFになります。</p>
+        <button class="btn" data-act="ics">カレンダーに追加（.ics）</button>
+        <div class="opts">${Object.entries(EV).map(([k, l]) => `<label><input type="checkbox" data-ics="${k}"${STATE.icsTypes.has(k) ? ' checked' : ''}> ${l}</label>`).join('')}</div>
+        <p class="note" style="margin:0">iPhoneはダウンロード後に「カレンダーに追加」。Googleカレンダーはパソコンの「設定→インポート」で読み込めます。</p>
+      </div>
+      <div class="panel"><h3>自分の日程</h3>${legendHTML()}${miniCalsHTML(ps)}</div>
+    </aside></div>`;
+}
+function legendHTML() {
+  return `<div class="legend"><span><i class="dot d-apply"></i>出願締切</span><span><i class="dot d-exam"></i>試験</span><span><i class="dot d-ann"></i>合格発表</span><span><i class="dot d-proc"></i>手続締切</span><span><i class="dot d-kyo"></i>共通テスト</span></div>`;
+}
+function calMonths() {
+  const s = M.settings.calStart || `${M.settings.year - 1 || 2026}-12-01`, e = M.settings.calEnd || `${M.settings.year || 2027}-03-31`;
+  const out = []; let d = dOf(s); d.setDate(1); const end = dOf(e);
+  while (d <= end) { out.push([d.getFullYear(), d.getMonth()]); d = new Date(d.getFullYear(), d.getMonth() + 1, 1); }
+  return out;
+}
+function monthHTML(y, m, cell, cls = '') {
+  const first = new Date(y, m, 1), days = new Date(y, m + 1, 0).getDate();
+  let h = `<div class="month ${cls}"><h4>${y}年${m + 1}月</h4><div class="cal">` + [...WD].map((w, i) => `<div class="hd${i === 0 ? ' sun' : i === 6 ? ' sat' : ''}">${w}</div>`).join('');
+  for (let i = 0; i < first.getDay(); i++) h += `<div class="day pad"></div>`;
+  for (let d = 1; d <= days; d++) { const iso = `${y}-${pad2(m + 1)}-${pad2(d)}`; h += cell(iso, new Date(y, m, d).getDay()); }
+  return h + `</div></div>`;
+}
+function miniCalsHTML(ps) {
+  const map = {};
+  ps.flatMap(eventsOf).forEach(e => (map[e.date] = map[e.date] || []).push(e));
+  const months = calMonths().filter(([y, m]) => Object.keys(map).some(k => k.startsWith(`${y}-${pad2(m + 1)}`)) || m <= 2);
+  return months.map(([y, m]) => monthHTML(y, m, (iso, wd) => {
+    const es = map[iso] || []; const kyo = M.settings.kyo.includes(iso);
+    const title = es.map(e => `${EV[e.type]}：${label(e.x, true)}`).join('\n') + (kyo ? '\n共通テスト' : '');
+    return `<div class="day${wd === 0 ? ' sun' : wd === 6 ? ' sat' : ''}${iso === today ? ' today' : ''}${kyo ? ' kyo' : ''}" title="${esc(title)}"><span class="n">${dOf(iso).getDate()}</span><span class="dots">${kyo ? '<i class="dot d-kyo"></i>' : ''}${es.map(e => `<i class="dot d-${e.type}"></i>`).join('')}</span></div>`;
+  })).join('');
+}
+
+/* ---------- 追加 ---------- */
+function addPick(id) {
+  const x = M.byId[id]; if (!x) return;
+  if (STATE.me.picks.some(p => p.id === id)) { toast('すでに追加しています'); return; }
+  STATE.me.picks.push({ id, date: x.date || '', pref: '未定', status: '検討中', memo: '', snap: snapOf(x) });
+  touch(); toast(`追加：${label(x, true)} ${x.met}${x.date ? ' ' + fmt(x.date) : ''}`);
+  refreshCounts();
+}
+function removePickById(id) {
+  const i = STATE.me.picks.findIndex(p => p.id === id); if (i < 0) return;
+  STATE.me.picks.splice(i, 1); touch(); refreshCounts();
+}
+function refreshCounts() {
+  const t = $('[data-tab="plan"] .cnt'); if (t) t.textContent = activePicks().length;
+}
+const mineIds = () => new Set((STATE.me ? STATE.me.picks : []).map(p => p.id));
+function exRowsHTML(rows, opts = {}) {
+  const mine = mineIds();
+  return `<div class="tbl-wrap"><table class="ex"><thead><tr>${opts.showUni ? '<th>大学</th><th>学部</th>' : opts.showFac ? '<th>学部</th>' : ''}<th>学科</th><th>方式</th><th>種別</th><th>試験日</th><th>出願締切</th><th>合格発表</th><th>手続締切</th><th>偏差値</th><th></th></tr></thead><tbody>${rows.map(x => {
+    const on = mine.has(x.id);
+    return `<tr${on ? ' class="added"' : ''}>${opts.showUni ? `<td>${esc(uniName(x.uni))}</td><td>${esc(facName(x.fac))}</td>` : opts.showFac ? `<td>${esc(facName(x.fac))}</td>` : ''}<td>${esc(depName(x.dep) || '—')}</td><td>${esc(x.met)}${x.note ? `<div class="note">${esc(x.note)}</div>` : ''}</td>
+      <td><span class="chip k-${esc(x.kind)}">${esc(x.kind)}</span>${x.conf && !/確定/.test(x.conf) ? ` <span class="chip conf">${esc(x.conf)}</span>` : ''}</td>
+      <td class="d">${x.date ? fmt(x.date) : (x.kind === '共テ利用' ? '共テのみ' : '—')}</td><td class="d">${fmt(x.close) || '—'}</td><td class="d">${fmt(x.ann) || '—'}</td><td class="d">${fmt(x.proc) || '—'}</td>
+      <td class="d">${esc(x.rank)}</td>
+      <td>${on ? `<button class="btn sm" data-del="${esc(x.id)}">追加済 ✓</button>` : `<button class="btn sm primary" data-add="${esc(x.id)}">追加</button>`}</td></tr>`;
+  }).join('')}</tbody></table></div>`;
+}
+function grpChips(cur, attr, withAll = true) {
+  return (withAll ? [['', 'すべて']] : []).concat(M.groups.map(g => [g, g])).map(([v, l]) => `<button class="fchip" ${attr}="${esc(v)}" aria-pressed="${cur instanceof Set ? cur.has(v) : cur === v}">${esc(l)}</button>`).join('');
+}
+function uniCardsHTML(filter, attr) {
+  const mineU = {}; (STATE.me ? STATE.me.picks : []).forEach(p => { const u = exOf(p).uni; mineU[u] = (mineU[u] || 0) + 1; });
+  let h = '', last = null;
+  for (const u of M.unis.filter(filter)) {
+    const g = M.uniInfo[u].grp;
+    if (g !== last) { h += `<div class="grp-h">${esc(g)}</div>`; last = g; }
+    h += `<button class="uni" ${attr}="${esc(u)}"><div class="nm">${esc(uniName(u))}</div><div class="meta">${M.uniCount[u]}件の入試</div>${mineU[u] ? `<div class="mine">${mineU[u]}件追加済</div>` : ''}</button>`;
+  }
+  return h ? `<div class="unis">${h}</div>` : `<div class="empty">該当する大学がありません。</div>`;
+}
+function uniTabHTML() {
+  const s = STATE.search;
+  if (s.uni) return uniDetailHTML(s.uni, s, false);
+  const q = s.q.trim();
+  return `<div class="filters">${grpChips(s.grp, 'data-sgrp')}<input class="inp search" id="s-q" placeholder="大学名で検索（例：明治、理科）" value="${esc(s.q)}"></div>
+    ${uniCardsHTML(u => (!s.grp || M.uniInfo[u].grp === s.grp) && (!q || uniName(u).includes(q) || u.includes(q)), 'data-suni')}`;
+}
+function uniDetailHTML(u, s, kyoOnly) {
+  const fq = (s.fq || '').trim();
+  const rows = M.rows.filter(x => x.uni === u && (kyoOnly ? x.kind === '共テ利用' : s.kinds.has(x.kind)) && (!fq || (x.fac + x.dep + x.met).includes(fq)));
+  const facs = []; const byFac = {};
+  rows.forEach(x => { if (!byFac[x.fac]) { byFac[x.fac] = []; facs.push(x.fac); } byFac[x.fac].push(x); });
+  const kindsHere = KINDS.filter(k => M.rows.some(x => x.uni === u && x.kind === k));
+  const open = facs.length <= 2 || !!fq;
+  return `<div class="uhead"><button class="btn sm" data-act="${kyoOnly ? 'kyoback' : 'uniback'}">← 大学一覧</button><h2>${esc(uniName(u))}</h2><span class="chip">${esc(M.uniInfo[u].grp)}</span></div>
+    <div class="filters">${kyoOnly ? `<span class="kyo-days">共通テスト ${M.settings.kyo.map(d => fmt(d)).join('・')}。共テ利用は大学での試験がないので、出願締切と発表日を確認して追加します。</span>`
+      : kindsHere.map(k => `<button class="fchip" data-kind="${k}" aria-pressed="${s.kinds.has(k)}">${k}</button>`).join('')}
+      <input class="inp search" id="${kyoOnly ? 'k-fq' : 's-fq'}" placeholder="学部・学科・方式で絞り込み（例：情報、数学）" value="${esc(fq)}"></div>
+    ${facs.length ? facs.map(f => `<details class="fac" data-fac="${esc(f)}"${open ? ' open' : ''}><summary>${esc(facName(f))}<span class="c">${byFac[f].length}件</span></summary><div class="fac-body">${open ? exRowsHTML(sortRows(byFac[f])) : ''}</div></details>`).join('')
+      : `<div class="empty">条件に合う入試がありません。${kyoOnly ? '' : '上の種別ボタンで「共テ利用」なども選べます。'}</div>`}`;
+}
+function sortRows(rows) { return rows.slice().sort((a, b) => (a.dep || '').localeCompare(b.dep || '', 'ja') || (a.date || '9').localeCompare(b.date || '9') || a.met.localeCompare(b.met, 'ja')); }
+
+/* ---------- カレンダーから ---------- */
+function calFilter(x) {
+  const c = STATE.cal; const q = c.q.trim();
+  return x.date && c.kinds.has(x.kind) && (!c.grps.size || c.grps.has(M.uniInfo[x.uni].grp)) && (!q || (uniName(x.uni) + x.uni + x.fac + x.dep + x.met).includes(q));
+}
+function calTabHTML() {
+  const c = STATE.cal;
+  const counts = {}; M.rows.forEach(x => { if (calFilter(x)) counts[x.date] = (counts[x.date] || 0) + 1; });
+  const max = Math.max(1, ...Object.values(counts));
+  const mineD = {}; activePicks().forEach(p => { const d = exOf(p).date; if (d && exOf(p).kind !== '共テ利用') mineD[d] = (mineD[d] || 0) + 1; });
+  const months = calMonths().filter(([y, m]) => Object.keys(counts).some(k => k.startsWith(`${y}-${pad2(m + 1)}`)));
+  const cal = months.map(([y, m]) => monthHTML(y, m, (iso, wd) => {
+    const n = counts[iso] || 0; const lv = n ? Math.min(4, 1 + Math.floor(3 * n / max)) : 0;
+    const kyo = M.settings.kyo.includes(iso);
+    return `<button class="day heat${lv}${wd === 0 ? ' sun' : wd === 6 ? ' sat' : ''}" data-day="${iso}" aria-pressed="${c.day === iso}"><span class="n">${dOf(iso).getDate()}</span>${n ? `<span class="c">${n}</span>` : kyo ? '<span class="note" style="margin:0">共テ</span>' : ''}${mineD[iso] ? `<span class="mine">予定${mineD[iso]}</span>` : ''}</button>`;
+  })).join('');
+  return `<div class="filters">${grpChips(c.grps, 'data-cgrp', false)}<input class="inp search" id="c-q" placeholder="大学・学部・学科で絞り込み（例：情報、看護、明治）" value="${esc(c.q)}"></div>
+    <div class="filters">${['一般', '共テ併用', '国公立'].map(k => `<button class="fchip" data-ckind="${k}" aria-pressed="${c.kinds.has(k)}">${k}</button>`).join('')}<span class="note">日付の数字＝その日に試験がある入試の件数（今の絞り込み条件）。日付を押すと一覧が出ます。</span></div>
+    <div class="bigcal"><div class="months">${cal || '<div class="empty">条件に合う試験日がありません。</div>'}</div></div>
+    <section id="dayPanel" style="margin-top:16px">${c.day ? dayPanelHTML(c.day) : ''}</section>`;
+}
+function dayPanelHTML(day) {
+  const rows = M.rows.filter(x => x.date === day && calFilter(x));
+  const unis = []; const by = {};
+  rows.forEach(x => { if (!by[x.uni]) { by[x.uni] = []; unis.push(x.uni); } by[x.uni].push(x); });
+  unis.sort((a, b) => M.unis.indexOf(a) - M.unis.indexOf(b));
+  const open = unis.length <= 3;
+  return `<div class="sec-h"><h2>${fmt(day)} の試験</h2><span class="hint">${rows.length}件・${unis.length}大学</span></div>
+    ${unis.map(u => `<details class="fac" data-dayuni="${esc(u)}"${open ? ' open' : ''}><summary>${esc(uniName(u))}<span class="chip">${esc(M.uniInfo[u].grp)}</span><span class="c">${by[u].length}件</span></summary><div class="fac-body">${open ? exRowsHTML(by[u].slice().sort((a, b) => a.fac.localeCompare(b.fac, 'ja') || a.dep.localeCompare(b.dep, 'ja')), { showFac: true }) : ''}</div></details>`).join('') || '<div class="empty">この日は条件に合う試験がありません。</div>'}`;
+}
+
+/* ---------- 共テ利用 ---------- */
+function kyoTabHTML() {
+  const k = STATE.kyo;
+  if (k.uni) return uniDetailHTML(k.uni, k, true);
+  const has = new Set(M.rows.filter(x => x.kind === '共テ利用').map(x => x.uni));
+  return `<div class="notice info">共通テスト（${M.settings.kyo.map(d => fmt(d)).join('・')}）の点数だけで合否が決まる入試です。出願締切は1月中旬（共テより前）が多いので早めに決めましょう。共テと個別試験を組み合わせる「共テ併用」は「大学から追加」に出ています。</div>
+    <div class="filters">${grpChips(k.grp, 'data-kgrp')}</div>
+    ${uniCardsHTML(u => has.has(u) && (!k.grp || M.uniInfo[u].grp === k.grp), 'data-kuni')}`;
+}
+
+/* ---------- 進路データ ---------- */
+const KYO_SUBJ = [['eng_r', '英語リーディング', 100], ['eng_l', '英語リスニング', 100], ['math1', '数学Ⅰ・A', 100], ['math2', '数学Ⅱ・B・C', 100], ['jpn', '国語', 200], ['sci1', '理科①', 100, true], ['sci2', '理科②', 100, true], ['soc', '地理歴史・公共', 100, true], ['info', '情報Ⅰ', 100]];
+const EIKEN = ['', 'なし', '3級', '準2級', '準2級プラス', '2級', '準1級', '1級'];
+const EXT = ['', 'TEAP', 'GTEC', 'IELTS', 'TOEFL iBT', 'TOEIC L&R/S&W', 'ケンブリッジ英検', 'その他'];
+const FIELDS = ['', '理学', '工学', '情報', '農学・生命', '医学・歯学', '薬学', '看護・医療', '建築・デザイン', '経済・経営・商', '法・政治', '文・人文', '外国語・国際', '教育', '社会・心理', 'その他'];
+function kyoTotals(pf) {
+  const t = (pf && pf.kyo) || {}; let tg = 0, mx = 0, mk = 0, mkMax = 0;
+  for (const [k, , full] of KYO_SUBJ) { const v = t[k] || {}; if (v.t !== '' && v.t != null && !isNaN(+v.t)) { tg += +v.t; mx += full; } if (v.m !== '' && v.m != null && !isNaN(+v.m)) { mk += +v.m; mkMax += full; } }
+  return { tg, mx, mk, mkMax };
+}
+function kyoTotalText(pf) { const r = kyoTotals(pf); return r.mx ? `共テ目標 ${r.tg}/${r.mx}点（${Math.round(r.tg / r.mx * 100)}%）` : '共テ目標 未入力'; }
+function profileHTML() {
+  const pf = STATE.me.profile; const t = pf.kyo || {}; const r = kyoTotals(pf);
+  const ext = pf.ext || [{}, {}];
+  return `<div class="pf">
+    <section class="panel"><h3>英語の資格・検定</h3>
+      <div class="row2"><div class="field"><label for="p-eiken">英検（取得級）</label><select id="p-eiken" class="inp" data-p="eiken">${EIKEN.map(v => `<option value="${v}"${pf.eiken === v ? ' selected' : ''}>${v || '選択'}</option>`).join('')}</select></div>
+      <div class="field"><label for="p-cse">英検CSEスコア</label><input id="p-cse" class="inp num" inputmode="numeric" data-p="cse" value="${esc(pf.cse || '')}" placeholder="例：2150"></div></div>
+      <div class="row2"><div class="field"><label for="p-eikenDate">取得時期</label><input id="p-eikenDate" class="inp" data-p="eikenDate" value="${esc(pf.eikenDate || '')}" placeholder="例：2026年6月"></div>
+      <div class="field"><label for="p-eikenPlan">今後の受験予定</label><input id="p-eikenPlan" class="inp" data-p="eikenPlan" value="${esc(pf.eikenPlan || '')}" placeholder="例：10月 準1級"></div></div>
+      ${ext.map((e, i) => `<div class="row2"><div class="field"><label for="p-ext${i}">その他の試験 ${i + 1}</label><select id="p-ext${i}" class="inp" data-ext="${i}" data-k="type">${EXT.map(v => `<option value="${v}"${e.type === v ? ' selected' : ''}>${v || 'なし'}</option>`).join('')}</select></div>
+        <div class="field"><label for="p-exts${i}">スコア</label><input id="p-exts${i}" class="inp num" data-ext="${i}" data-k="score" value="${esc(e.score || '')}" placeholder="例：GTEC 1180"></div></div>`).join('')}
+      <p class="note">英語外部試験利用型の方式（出願資格・得点換算）を選ぶときの判断材料になります。</p>
+    </section>
+    <section class="panel"><h3>共通テストの目標点</h3>
+      <label style="font-size:14px"><input type="checkbox" data-p="kyoTake"${pf.kyoTake !== false ? ' checked' : ''}> 共通テストを受験する</label>
+      <div style="overflow-x:auto;margin-top:8px"><table class="kt"><thead><tr><th>科目</th><th>選択科目名</th><th>満点</th><th>目標点</th><th>直近の模試</th></tr></thead><tbody>
+      ${KYO_SUBJ.map(([k, l, full, nm]) => { const v = t[k] || {}; return `<tr><td>${l}</td><td>${nm ? `<input class="nm" data-kyo="${k}" data-k="n" value="${esc(v.n || '')}" placeholder="${k === 'soc' ? '例：地理総合・地理探究' : '例：物理'}">` : ''}</td><td class="num">${full}</td>
+        <td><input inputmode="numeric" data-kyo="${k}" data-k="t" value="${esc(v.t ?? '')}"></td><td><input inputmode="numeric" data-kyo="${k}" data-k="m" value="${esc(v.m ?? '')}"></td></tr>`; }).join('')}
+      </tbody><tfoot><tr><td colspan="2">合計（入力した科目）</td><td class="num" id="kt-max">${r.mx || ''}</td><td class="num" id="kt-tg">${r.mx ? `${r.tg}（${Math.round(r.tg / r.mx * 100)}%）` : ''}</td><td class="num" id="kt-mk">${r.mkMax ? `${r.mk}（${Math.round(r.mk / r.mkMax * 100)}%）` : ''}</td></tr></tfoot></table></div>
+      <div class="bar"><i id="kt-bar" style="width:${r.mx ? Math.round(r.tg / r.mx * 100) : 0}%"></i></div>
+      <p class="note">理科は基礎2科目なら「理科①」に合計（100点満点）を入れてください。</p>
+    </section>
+    <section class="panel"><h3>志望</h3>
+      <div class="field"><label for="p-hope1">第1志望校（学部・学科まで）</label><input id="p-hope1" class="inp" data-p="hope1" value="${esc(pf.hope1 || '')}" placeholder="例：東京理科大学 創域理工学部 数理科学科"></div>
+      <div class="field"><label for="p-field">志望系統</label><select id="p-field" class="inp" data-p="field">${FIELDS.map(v => `<option value="${v}"${pf.field === v ? ' selected' : ''}>${v || '選択'}</option>`).join('')}</select></div>
+      <div class="field"><label for="p-budget">受験料・遠征の上限など（家庭と相談したこと）</label><input id="p-budget" class="inp" data-p="budget" value="${esc(pf.budget || '')}" placeholder="例：受験料は合計25万円まで、地方会場は使わない"></div>
+    </section>
+    <section class="panel"><h3>先生への連絡・メモ</h3>
+      <div class="field"><label for="p-memo">相談したいこと</label><textarea id="p-memo" class="inp" rows="6" data-p="memo" placeholder="例：2/5と2/7どちらを受けるか迷っています">${esc(pf.memo || '')}</textarea></div>
+    </section>
+  </div>`;
+}
+
+/* ============================================================
+   書き出し：PDF（印刷）・ics
+   ============================================================ */
+function printHTMLFor(st) {
+  const ps = (st.picks || []).filter(p => p.status !== '取りやめ');
+  const rows = ps.slice().sort((a, b) => { const A = exOf(a), B = exOf(b); return (A.kind === '共テ利用') - (B.kind === '共テ利用') || (A.date || A.ann || '9').localeCompare(B.date || B.ann || '9'); });
+  const pf = st.profile || {}; const r = kyoTotals(pf);
+  const ext = (pf.ext || []).filter(e => e.type).map(e => `${e.type} ${e.score || ''}`).join('、');
+  const evMap = {}; ps.flatMap(eventsOf).forEach(e => (evMap[e.date] = evMap[e.date] || []).push(e));
+  const months = calMonths().filter(([y, m]) => m <= 2 || Object.keys(evMap).some(k => k.startsWith(`${y}-${pad2(m + 1)}`)));
+  const cnt = ym => Object.keys(evMap).filter(k => k.startsWith(`${ym[0]}-${pad2(ym[1] + 1)}`)).reduce((a, k) => a + evMap[k].filter(e => e.type === 'exam').length, 0);
+  const big = months.slice().sort((a, b) => cnt(b) - cnt(a))[0];
+  const shortU = u => uniName(u).replace(/大学$/, '').replace(/^東京/, '東').slice(0, 5);
+  const pcal = ([y, m], isBig) => {
+    const first = new Date(y, m, 1), days = new Date(y, m + 1, 0).getDate(); let cells = [];
+    for (let i = 0; i < first.getDay(); i++) cells.push('<td class="o"></td>');
+    for (let d = 1; d <= days; d++) {
+      const iso = `${y}-${pad2(m + 1)}-${pad2(d)}`; const es = (evMap[iso] || []).slice().sort((a, b) => ['exam', 'apply', 'ann', 'proc'].indexOf(a.type) - ['exam', 'apply', 'ann', 'proc'].indexOf(b.type));
+      const kyo = M.settings.kyo.includes(iso);
+      cells.push(`<td><span class="n">${d}</span>${kyo ? '<span class="ev e-kyo">共テ</span>' : ''}${es.map(e => `<span class="ev e-${e.type}">${{ apply: '〆', exam: '◎', ann: '発', proc: '手' }[e.type]}${esc(isBig ? uniName(e.x.uni).replace(/大学$/, '') + (e.type === 'exam' ? ' ' + e.x.fac : '') : shortU(e.x.uni))}</span>`).join('')}</td>`);
+    }
+    while (cells.length % 7) cells.push('<td class="o"></td>');
+    let h = `<div><h2>${y}年${m + 1}月</h2><table class="pcal${isBig ? ' big' : ''}"><tr>${[...WD].map(w => `<th>${w}</th>`).join('')}</tr>`;
+    for (let i = 0; i < cells.length; i += 7) h += `<tr>${cells.slice(i, i + 7).join('')}</tr>`;
+    return h + '</table></div>';
+  };
+  return `<section class="pp"><h1>${esc(M.settings.year)}年度入試 受験校一覧</h1>
+    <div class="meta"><span>${esc(C.SCHOOL || '')} ${esc(st.cls)} ${esc(st.no)}番　<b>${esc(st.name)}</b></span><span>出力日 ${today.replace(/-/g, '/')}</span></div>
+    <div class="prof"><div>英検：${esc(pf.eiken || '—')}${pf.cse ? `（CSE ${esc(pf.cse)}）` : ''}${ext ? `／${esc(ext)}` : ''}</div><div>共テ目標：${r.mx ? `${r.tg}/${r.mx}点（${Math.round(r.tg / r.mx * 100)}%）` : '—'}${r.mkMax ? `　直近模試 ${r.mk}/${r.mkMax}` : ''}</div>
+    <div>第1志望：${esc(pf.hope1 || '—')}</div><div>志望系統：${esc(pf.field || '—')}</div></div>
+    <table><thead><tr><th>試験日</th><th>大学・学部・学科</th><th>方式</th><th>出願期間</th><th>合格発表</th><th>手続締切</th><th>志望度</th><th>状況</th></tr></thead><tbody>
+    ${rows.map(p => { const x = exOf(p); return `<tr><td class="d">${x.kind === '共テ利用' ? '共テ利用' : (fmt(x.date) || '—')}</td><td>${esc(label(x))}</td><td>${esc(x.met)}<br><small>${esc(x.kind)}</small></td><td class="d">${x.open ? fmt(x.open, false) + '〜' : ''}${fmt(x.close) || '要確認'}</td><td class="d">${fmt(x.ann) || '要確認'}</td><td class="d">${fmt(x.proc) || '要確認'}</td><td class="nw">${esc(p.pref)}</td><td class="nw">${esc(p.status)}${p.memo ? `<br><small style="white-space:normal">${esc(p.memo)}</small>` : ''}</td></tr>`; }).join('') || '<tr><td colspan="8">登録なし</td></tr>'}
+    </tbody></table>
+    <p class="foot">日程は大学データ（${esc(M.settings.updated || '')}時点）によるものです。出願前に必ず各大学の募集要項で確認してください。</p></section>
+    <section class="pp"><h1>${esc(st.name)}さんの受験カレンダー</h1><div class="meta"><span>◎試験　〆出願締切　発 合格発表　手 手続締切</span><span>${esc(st.cls)} ${esc(st.no)}番</span></div>
+    ${big ? pcal(big, true) : ''}<div class="pm">${months.filter(x => x !== big).map(x => pcal(x, false)).join('')}</div></section>`;
+}
+function doPrint(students) {
+  $('#print').innerHTML = students.map(printHTMLFor).join('');
+  setTimeout(() => window.print(), 60);
+}
+function icsEscape(s) { return String(s || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n'); }
+function icsFold(line) {
+  const enc = new TextEncoder(); const out = []; let cur = '', bytes = 0;
+  for (const ch of line) { const b = enc.encode(ch).length; if (bytes + b > (out.length ? 74 : 75)) { out.push(cur); cur = ''; bytes = 0; } cur += ch; bytes += b; }
+  out.push(cur); return out.join('\r\n ');
+}
+function buildICS(st, types) {
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+  const L = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//jukenko-planner//JA', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', `X-WR-CALNAME:受験予定 ${M.settings.year}`, 'X-WR-TIMEZONE:Asia/Tokyo'];
+  const ps = (st.picks || []).filter(p => !['取りやめ', '不合格'].includes(p.status));
+  const prefix = { apply: '【出願締切】', exam: '【試験】', ann: '【合格発表】', proc: '【手続締切】' };
+  for (const e of ps.flatMap(eventsOf)) {
+    if (!types.has(e.type)) continue;
+    const x = e.x; const d = e.date.replace(/-/g, ''), d2 = addDays(e.date, 1).replace(/-/g, '');
+    const desc = [`${label(x)}`, `方式：${x.met}（${x.kind}）`, x.date ? `試験日：${fmt(x.date)}` : '', `出願：${x.open ? fmt(x.open) + '〜' : ''}${fmt(x.close) || '要確認'}`, `合格発表：${fmt(x.ann) || '要確認'}`, `手続締切：${fmt(x.proc) || '要確認'}`, x.note, '※必ず募集要項で確認'].filter(Boolean).join('\n');
+    L.push('BEGIN:VEVENT', `UID:${e.p.id}-${e.type}@jukenko-planner`, `DTSTAMP:${stamp}`, `DTSTART;VALUE=DATE:${d}`, `DTEND;VALUE=DATE:${d2}`,
+      `SUMMARY:${icsEscape(prefix[e.type] + uniName(x.uni) + ' ' + facName(x.fac) + ' ' + x.met)}`, `DESCRIPTION:${icsEscape(desc)}`, 'TRANSP:TRANSPARENT');
+    if (e.type === 'apply') L.push('BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsEscape('出願締切まであと3日：' + uniName(x.uni))}`, 'TRIGGER:-P3D', 'END:VALARM');
+    if (e.type === 'exam') L.push('BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsEscape('明日は試験：' + uniName(x.uni))}`, 'TRIGGER:-PT9H', 'END:VALARM');
+    L.push('END:VEVENT');
+  }
+  for (const k of M.settings.kyo) {
+    L.push('BEGIN:VEVENT', `UID:kyotsu-${k}@jukenko-planner`, `DTSTAMP:${stamp}`, `DTSTART;VALUE=DATE:${k.replace(/-/g, '')}`, `DTEND;VALUE=DATE:${addDays(k, 1).replace(/-/g, '')}`, 'SUMMARY:【試験】大学入学共通テスト', 'END:VEVENT');
+  }
+  L.push('END:VCALENDAR');
+  return L.map(icsFold).join('\r\n') + '\r\n';
+}
+
+/* ============================================================
+   画面：教員
+   ============================================================ */
+function importPanelHTML() {
+  const t = STATE.teacher;
+  return `<section class="panel" style="margin-bottom:14px"><h3>提出データを読み込む</h3>
+    <p style="margin:0 0 8px;font-size:14px">Formsの回答Excel（.xlsx）や、コードを貼ったメール・Classroomの画面をまとめてコピーしたものを入れてください。中から JKP… のコードだけを拾います。同じ生徒が何回出していても、いちばん新しいものを使います。</p>
+    <div class="tools"><input type="file" id="imp-files" accept=".xlsx,.xls,.csv,.txt" multiple class="inp" style="width:auto;flex:1 1 220px"></div>
+    <textarea id="imp-text" class="inp" rows="3" placeholder="ここに貼り付け（何人分でも、前後に文章が混ざっていてもOK）"></textarea>
+    <div class="tools" style="margin:8px 0 0"><button class="btn primary" data-act="imp-go">貼り付けた内容を読み込む</button><button class="btn ghost" data-act="imp-clear">読み込んだデータを消す</button><span class="note">${t.students.length}人分を表示中。データはこの画面にだけあり、閉じると消えます。</span></div>
+    ${t.imp ? `<p class="notice info" style="margin-bottom:0">${esc(t.imp)}</p>` : ''}</section>`;
+}
+async function importTexts(texts) {
+  const t = STATE.teacher; const codes = new Set();
+  texts.forEach(x => (String(x).match(CODE_RE) || []).forEach(c => codes.add(c)));
+  const map = new Map(t.students.map(s => [s.cls + '#' + s.no, s]));
+  let ok = 0, bad = 0, older = 0;
+  for (const c of codes) {
+    try {
+      const s = await decodeCode(c); ok++;
+      const key = s.cls + '#' + s.no; const cur = map.get(key);
+      if (!cur || String(s.updated) >= String(cur.updated)) { if (cur) older++; map.set(key, s); } else older++;
+    } catch (e) { bad++; }
+  }
+  t.students = [...map.values()];
+  t.imp = codes.size ? `コード${codes.size}件を読み取り、${t.students.length}人分を表示しています。${older ? `同じ生徒の古いコード${older}件は新しいもので置き換えました。` : ''}${bad ? `読めなかったコード${bad}件（途中で切れている可能性があります）。` : ''}` : 'コード（JKP… で始まる文字）が見つかりませんでした。';
+  render();
+}
+async function importFiles(files) {
+  const texts = [];
+  for (const f of files) {
+    if (/\.(xlsx|xls)$/i.test(f.name)) {
+      const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });
+      wb.SheetNames.forEach(n => texts.push(XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, defval: '' }).map(r => r.join('\t')).join('\n')));
+    } else texts.push(await f.text());
+  }
+  importTexts(texts);
+}
+function tFiltered() {
+  const t = STATE.teacher; const q = t.q.trim();
+  return t.students.filter(s => (!t.cls || s.cls === t.cls) && (!q || (s.name || '').includes(q)))
+    .sort((a, b) => String(a.cls).localeCompare(String(b.cls), 'ja', { numeric: true }) || (+a.no - +b.no));
+}
+function teacherHTML() {
+  const t = STATE.teacher;
+  const classes = [...new Set(t.students.map(s => s.cls))].sort((a, b) => String(a).localeCompare(String(b), 'ja', { numeric: true }));
+  const tabs = [['list', '生徒一覧'], ['days', '日別の受験者'], ['data', '大学データ']];
+  return headerHTML('<span><b>教員ページ</b></span>', `<button class="btn sm ghost" data-act="logout">終了</button>`) +
+    `<div class="wrap"><nav class="tabs">${tabs.map(([k, l]) => `<button class="tab" aria-selected="${t.tab === k}" data-ttab="${k}">${l}</button>`).join('')}</nav>
+    ${t.tab !== 'data' ? importPanelHTML() : ''}
+    ${t.tab !== 'data' ? `<div class="tools"><select class="inp" id="t-cls" style="width:auto"><option value="">全クラス</option>${classes.map(c => `<option${t.cls === c ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select>
+      <input class="inp" id="t-q" style="width:auto;flex:1 1 160px" placeholder="氏名で検索" value="${esc(t.q)}"></div>` : ''}
+    ${t.tab === 'list' ? tListHTML() : t.tab === 'days' ? tDaysHTML() : tDataHTML()}</div>
+    ${t.detail ? tDetailHTML(t.detail) : ''}`;
+}
+function tListHTML() {
+  const t = STATE.teacher; const list = tFiltered();
+  const allSel = list.length && list.every(s => t.sel.has(s.cls + '#' + s.no));
+  return `<div class="tools"><button class="btn" data-act="csv-picks">受験校一覧CSV（1行1受験）</button><button class="btn" data-act="csv-students">生徒一覧CSV（1行1生徒）</button>
+    <button class="btn primary" data-act="tprint">選んだ生徒の日程表PDF（${[...t.sel].length}人）</button><span class="note">CSVは表示中のクラス・検索結果が対象です。</span></div>
+    <div class="tbl-wrap" style="border:1px solid var(--line);border-radius:var(--r)"><table class="ttable"><thead><tr><th><input type="checkbox" data-act="selall"${allSel ? ' checked' : ''} aria-label="すべて選択"></th><th>組</th><th>番号</th><th>氏名</th><th>受験校</th><th>一般/併用</th><th>共テ利用</th><th>国公立</th><th>英検</th><th>共テ目標</th><th>第1志望</th><th>更新</th><th></th></tr></thead><tbody>
+    ${list.map(s => { const ps = (s.picks || []).filter(p => p.status !== '取りやめ'); const k = n => ps.filter(p => n.includes(exOf(p).kind)).length; const r = kyoTotals(s.profile); const key = s.cls + '#' + s.no;
+      return `<tr><td><input type="checkbox" data-sel="${esc(key)}"${t.sel.has(key) ? ' checked' : ''} aria-label="選択"></td><td>${esc(s.cls)}</td><td class="num">${esc(s.no)}</td><td><b>${esc(s.name)}</b></td><td class="num">${ps.length}</td><td class="num">${k(['一般', '共テ併用'])}</td><td class="num">${k(['共テ利用'])}</td><td class="num">${k(['国公立'])}</td>
+      <td>${esc((s.profile || {}).eiken || '')}${(s.profile || {}).cse ? ` <span class="num">${esc(s.profile.cse)}</span>` : ''}</td><td class="num">${r.mx ? `${r.tg}/${r.mx}` : ''}</td><td style="max-width:220px;overflow:hidden;text-overflow:ellipsis">${esc((s.profile || {}).hope1 || '')}</td><td class="num">${s.updated ? esc(String(s.updated).slice(5, 16).replace('T', ' ')) : ''}</td>
+      <td><button class="btn sm" data-detail="${esc(key)}">詳細</button></td></tr>`; }).join('') || '<tr><td colspan="13">上の欄から提出データを読み込んでください。</td></tr>'}
+    </tbody></table></div>`;
+}
+function tDetailHTML(key) {
+  const s = STATE.teacher.students.find(x => x.cls + '#' + x.no === key); if (!s) return '';
+  const ps = (s.picks || []).slice().sort((a, b) => (exOf(a).date || exOf(a).ann || '9').localeCompare(exOf(b).date || exOf(b).ann || '9'));
+  const pf = s.profile || {};
+  return `<div class="drawer" data-act="closedetail"><div class="in" data-stop="1">
+    <div class="uhead"><button class="btn sm" data-act="closedetail">閉じる</button><h2>${esc(s.cls)} ${esc(s.no)}番 ${esc(s.name)}</h2><button class="btn sm primary" data-act="tprint1" data-key="${esc(key)}">PDF</button></div>
+    <div class="panel" style="margin-bottom:12px;font-size:14px"><div>英検：${esc(pf.eiken || '—')} ${pf.cse ? `CSE ${esc(pf.cse)}` : ''} ${(pf.ext || []).filter(e => e.type).map(e => esc(e.type + ' ' + (e.score || ''))).join('、')}</div>
+      <div>${kyoTotalText(pf)}（共テ${pf.kyoTake === false ? '受験しない' : '受験する'}）</div><div>第1志望：${esc(pf.hope1 || '—')}　系統：${esc(pf.field || '—')}</div>${pf.budget ? `<div>家庭との相談：${esc(pf.budget)}</div>` : ''}${pf.memo ? `<div class="notice info" style="margin-bottom:0">生徒から：${esc(pf.memo)}</div>` : ''}</div>
+    <div class="tbl-wrap"><table class="ex"><thead><tr><th>試験日</th><th>大学・学部・学科</th><th>方式</th><th>出願締切</th><th>発表</th><th>手続</th><th>志望度</th><th>状況</th><th>メモ</th></tr></thead><tbody>
+    ${ps.map(p => { const x = exOf(p); const w = warningsFor(p, ps.filter(q => q.status !== '取りやめ')).filter(w => w.bad); return `<tr><td class="d">${x.kind === '共テ利用' ? '共テ利用' : fmt(x.date)}</td><td>${esc(label(x))}${w.length ? `<div class="w bad">${esc(w.map(z => z.t).join(' / '))}</div>` : ''}</td><td>${esc(x.met)}</td><td class="d">${fmt(x.close)}</td><td class="d">${fmt(x.ann)}</td><td class="d">${fmt(x.proc)}</td><td>${esc(p.pref)}</td><td>${esc(p.status)}</td><td>${esc(p.memo || '')}</td></tr>`; }).join('') || '<tr><td colspan="9">未登録</td></tr>'}
+    </tbody></table></div></div></div>`;
+}
+function tDaysHTML() {
+  const by = {};
+  for (const s of tFiltered()) for (const p of (s.picks || [])) {
+    if (['取りやめ'].includes(p.status)) continue; const x = exOf(p); if (!x.date || x.kind === '共テ利用') continue;
+    (by[x.date] = by[x.date] || []).push({ s, x, p });
+  }
+  const days = Object.keys(by).sort();
+  return `<div class="tools"><button class="btn" data-act="csv-days">日別の受験者CSV</button><span class="note">2月の公欠・出席管理や、同じ日に受験する生徒の確認に使えます。</span></div>
+    <div class="daylist">${days.map(d => `<details><summary><b class="num">${fmt(d)}</b><span>${by[d].length}人</span><span class="note">${[...new Set(by[d].map(e => uniName(e.x.uni)))].slice(0, 6).join('・')}${new Set(by[d].map(e => e.x.uni)).size > 6 ? ' ほか' : ''}</span></summary>
+      <div class="names">${by[d].sort((a, b) => String(a.s.cls).localeCompare(String(b.s.cls), 'ja', { numeric: true }) || a.s.no - b.s.no).map(e => `<div>${esc(e.s.cls)} ${esc(e.s.no)}番 ${esc(e.s.name)}：${esc(label(e.x))} ${esc(e.x.met)}</div>`).join('')}</div></details>`).join('') || '<div class="empty">まだ受験予定が登録されていません。</div>'}</div>`;
+}
+function tDataHTML() {
+  const cnt = {}; M.rows.forEach(x => cnt[x.conf || '（空欄）'] = (cnt[x.conf || '（空欄）'] || 0) + 1);
+  const kinds = {}; M.rows.forEach(x => kinds[x.kind] = (kinds[x.kind] || 0) + 1);
+  const conv = STATE.teacher.conv;
+  return `<div class="pf">
+    <section class="panel"><h3>いま読み込んでいる大学データ</h3>
+      <p style="margin:0 0 6px">${esc(C.MASTER_URL)}：${M.rows.length.toLocaleString()}行・${M.unis.length}大学（データ更新日 ${esc(M.settings.updated || '—')}）</p>
+      <p class="note" style="margin:0">種別：${Object.entries(kinds).map(([k, v]) => `${esc(k)} ${v}`).join('／')}</p>
+      <p class="note">確度：${Object.entries(cnt).map(([k, v]) => `${esc(k)} ${v}`).join('／')}</p>
+      <button class="btn" data-act="dl-master">このデータをExcelで保存</button>
+      <p class="note">日程を直すときは、このExcelの「入試日程」シートを編集して、GitHubの data/master.xlsx を差し替えます。生徒の登録は ID で結びついているので、既存行の ID は変えないでください。</p>
+    </section>
+    <section class="panel"><h3>次年度：Kei-Netの入試日一覧から作る</h3>
+      <p style="margin-top:0;font-size:14px">Kei-Net「入試日一覧」でダウンロードしたExcel（複数可）を選ぶと、この大学データの形式（1行＝1試験）に変換します。出願締切・合格発表・手続締切は空欄になるので、Excelで入力してください。</p>
+      <input type="file" id="kn-files" accept=".xlsx,.xls" multiple class="inp">
+      ${conv ? `<p class="notice info">${conv.files}ファイルから ${conv.rows.length}行（${conv.unis}大学）を読み取りました。${conv.skipped ? `読み取れなかったセル ${conv.skipped}件。` : ''}</p>
+        <button class="btn primary" data-act="dl-conv">変換結果をExcelで保存</button>` : ''}
+      <p class="note">共テ利用・国公立の行は Kei-Net の「科目・配点」データなどから追加してください。</p>
+    </section>
+  </div>`;
+}
+function picksCSVRows(list) {
+  const out = [['組', '番号', '氏名', '区分', '大学', '学部', '学科', '方式', '種別', '試験日', '出願開始', '出願締切', '合格発表', '手続締切', '志望度', '状況', 'メモ', '偏差値帯', '確度', 'ID']];
+  for (const s of list) for (const p of (s.picks || [])) { const x = exOf(p); out.push([s.cls, s.no, s.name, x.grp, uniName(x.uni), facName(x.fac), depName(x.dep), x.met, x.kind, x.date, x.open, x.close, x.ann, x.proc, p.pref, p.status, p.memo, x.rank, x.conf, p.id]); }
+  return out;
+}
+function studentsCSVRows(list) {
+  const out = [['組', '番号', '氏名', '受験校数', '一般・共テ併用', '共テ利用', '国公立', '英検', 'CSE', 'その他の試験', '共テ受験', ...KYO_SUBJ.map(s => s[1] + '目標'), '共テ目標合計', '目標満点', '目標得点率', '直近模試合計', '第1志望', '志望系統', '家庭との相談', '生徒メモ', '最終更新']];
+  for (const s of list) {
+    const ps = (s.picks || []).filter(p => p.status !== '取りやめ'); const k = n => ps.filter(p => n.includes(exOf(p).kind)).length; const pf = s.profile || {}; const r = kyoTotals(pf);
+    out.push([s.cls, s.no, s.name, ps.length, k(['一般', '共テ併用']), k(['共テ利用']), k(['国公立']), pf.eiken || '', pf.cse || '', (pf.ext || []).filter(e => e.type).map(e => e.type + ' ' + (e.score || '')).join(' / '), pf.kyoTake === false ? 'しない' : 'する',
+      ...KYO_SUBJ.map(([kk]) => ((pf.kyo || {})[kk] || {}).t ?? ''), r.mx ? r.tg : '', r.mx || '', r.mx ? Math.round(r.tg / r.mx * 1000) / 10 + '%' : '', r.mkMax ? r.mk : '', pf.hope1 || '', pf.field || '', pf.budget || '', pf.memo || '', s.updated || '']);
+  }
+  return out;
+}
+function daysCSVRows(list) {
+  const out = [['日付', '曜日', '組', '番号', '氏名', '大学', '学部', '学科', '方式', '状況']]; const rows = [];
+  for (const s of list) for (const p of (s.picks || [])) { if (p.status === '取りやめ') continue; const x = exOf(p); if (!x.date || x.kind === '共テ利用') continue; rows.push([x.date, WD[dOf(x.date).getDay()], s.cls, s.no, s.name, uniName(x.uni), facName(x.fac), depName(x.dep), x.met, p.status]); }
+  rows.sort((a, b) => a[0].localeCompare(b[0]) || String(a[2]).localeCompare(String(b[2]), 'ja', { numeric: true }) || a[3] - b[3]);
+  return out.concat(rows);
+}
+const stamp8 = () => today.replace(/-/g, '');
+function masterSheetRows(rows) {
+  const head = ['ID', '区分', '大学', '学部', '学科', '方式', '種別', '試験日', '出願開始', '出願締切', '合格発表', '手続締切', '偏差値帯', '備考', '確度', '出典'];
+  return [head].concat(rows.map(x => [x.id, x.grp, x.uni, x.fac, x.dep, x.met, x.kind, x.date, x.open, x.close, x.ann, x.proc, x.rank, x.note, x.conf, x.src]));
+}
+function saveMasterXlsx(rows, name) {
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(masterSheetRows(rows)), '入試日程');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['大学', '表示名', '区分', '国私']].concat(M.unis.map(u => [u, uniName(u), M.uniInfo[u].grp, M.uniInfo[u].kokushi]))), '大学');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['項目', '値', '説明'], ['年度', M.settings.year, ''], ['共通テスト1日目', M.settings.kyo[0] || '', ''], ['共通テスト2日目', M.settings.kyo[1] || '', ''], ['カレンダー開始', M.settings.calStart, ''], ['カレンダー終了', M.settings.calEnd, ''], ['データ更新日', today, ''], ['注意文', M.settings.notice, '']]), '設定');
+  XLSX.writeFile(wb, name);
+}
+/* Kei-Net 入試日一覧 → 入試日程 */
+async function convertKeinet(files) {
+  const out = []; const seen = new Set(); let skipped = 0;
+  for (const f of files) {
+    const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const a = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
+    const hi = a.findIndex(r => String(r[0]).includes('ランク偏差値'));
+    if (hi < 0) { skipped++; continue; }
+    const head = a[hi].map(h => String(h).replace(/_x000D_/g, '').replace(/\s+/g, ' ').trim());
+    let cur = '';
+    for (const r of a.slice(hi + 1)) {
+      if (r[0] !== '' && r[0] != null) cur = normDate(r[0]) || cur;
+      for (let j = 1; j < r.length; j++) {
+        const cell = String(r[j] || '').replace(/_x000D_/g, ''); if (!cell.trim()) continue;
+        for (let s of cell.split(/\n/)) {
+          s = s.trim(); if (!s) continue;
+          const m = s.match(/^【(.+?)】(.*)$/); if (!m || !cur) { skipped++; continue; }
+          const uni = m[1]; let rest = m[2]; const notes = [];
+          if (rest.includes('[自]')) notes.push('試験日自由選択（他日程でも受験可）');
+          const mm = rest.match(/<(.+?)>/); if (mm) notes.push(mm[1]);
+          rest = rest.replace(/<.+?>/g, '').replace(/\[自\]|\[指\]/g, '').trim();
+          const p = rest.split('-'); let fac = p[0], dep = '', met = '一般';
+          if (p.length >= 3) { dep = p[1]; met = p.slice(2).join('-'); } else if (p.length === 2) { if (/方式|日程|全学|学部|統一|英語|技能|科目|教科|型|コア|プラス|期|共通|併用|利用/.test(p[1])) met = p[1]; else dep = p[1]; }
+          const kind = met.includes('(テ)') ? '共テ併用' : '一般'; met = met.replace('(テ)', '');
+          const rk = (head[j] || '').match(/([\d.]+～[\d.]+)/); const rank = rk ? rk[1] : (head[j].includes('設定') ? '設定なし' : head[j]);
+          const key = [uni, fac, dep, met, cur].join('|'); if (seen.has(key)) continue; seen.add(key);
+          const grp = (M.uniInfo[uni] && M.uniInfo[uni].grp) || '';
+          out.push({ id: '', grp, uni, fac, dep, met, kind, date: cur, open: '', close: '', ann: '', proc: '', rank, note: notes.join('／'), conf: '要確認', src: 'Kei-Net入試日一覧' });
+        }
+      }
+    }
+  }
+  STATE.teacher.conv = { rows: out, files: files.length, skipped, unis: new Set(out.map(x => x.uni)).size };
+  render();
+}
+
+/* ============================================================
+   イベント
+   ============================================================ */
+function afterRender() {
+  renderSave();
+  const lf = $('#loginForm'); if (lf) lf.addEventListener('submit', doLogin);
+  $$('details.fac').forEach(d => d.addEventListener('toggle', () => {
+    if (!d.open) return; const body = $('.fac-body', d); if (body.innerHTML) return;
+    if (d.dataset.fac !== undefined) {
+      const kyoOnly = STATE.tab === 'kyo'; const s = kyoOnly ? STATE.kyo : STATE.search; const fq = (s.fq || '').trim();
+      body.innerHTML = exRowsHTML(sortRows(M.rows.filter(x => x.uni === s.uni && x.fac === d.dataset.fac && (kyoOnly ? x.kind === '共テ利用' : s.kinds.has(x.kind)) && (!fq || (x.fac + x.dep + x.met).includes(fq)))));
+    } else if (d.dataset.dayuni !== undefined) {
+      body.innerHTML = exRowsHTML(M.rows.filter(x => x.date === STATE.cal.day && x.uni === d.dataset.dayuni && calFilter(x)).sort((a, b) => a.fac.localeCompare(b.fac, 'ja') || a.dep.localeCompare(b.dep, 'ja')), { showFac: true });
+    }
+  }));
+}
+function rerenderTab() { const tb = $('#tabBody'); if (tb) { tb.innerHTML = tabBody(); afterRender(); } else render(); }
+function keepFocus(id, fn) {
+  const el = document.getElementById(id); const pos = el ? el.selectionStart : null; fn();
+  const n = document.getElementById(id); if (n) { n.focus(); if (pos != null) try { n.setSelectionRange(pos, pos); } catch (e) { } }
+}
+document.addEventListener('click', async e => {
+  const t = e.target.closest('button, [data-act], input[type=checkbox]'); if (!t) return;
+  const d = t.dataset;
+  if (d.tab) { STATE.tab = d.tab; render(); window.scrollTo({ top: 0 }); return; }
+  if (d.add) { addPick(d.add); const tr = t.closest('tr'); if (tr) { tr.classList.add('added'); t.outerHTML = `<button class="btn sm" data-del="${esc(d.add)}">追加済 ✓</button>`; } return; }
+  if (d.del) { removePickById(d.del); const tr = t.closest('tr'); if (tr) { tr.classList.remove('added'); t.outerHTML = `<button class="btn sm primary" data-add="${esc(d.del)}">追加</button>`; } toast('取り消しました'); return; }
+  if (d.sgrp !== undefined) { STATE.search.grp = d.sgrp; rerenderTab(); return; }
+  if (d.suni) { STATE.search.uni = d.suni; STATE.search.fq = ''; rerenderTab(); window.scrollTo({ top: 0 }); return; }
+  if (d.kind) { const k = STATE.search.kinds; k.has(d.kind) ? k.delete(d.kind) : k.add(d.kind); rerenderTab(); return; }
+  if (d.cgrp !== undefined) { const g = STATE.cal.grps; g.has(d.cgrp) ? g.delete(d.cgrp) : g.add(d.cgrp); rerenderTab(); return; }
+  if (d.ckind) { const k = STATE.cal.kinds; k.has(d.ckind) ? k.delete(d.ckind) : k.add(d.ckind); rerenderTab(); return; }
+  if (d.day) { STATE.cal.day = d.day; $$('[data-day]').forEach(b => b.setAttribute('aria-pressed', b.dataset.day === d.day)); $('#dayPanel').innerHTML = dayPanelHTML(d.day); afterRender(); $('#dayPanel').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+  if (d.kgrp !== undefined) { STATE.kyo.grp = d.kgrp; rerenderTab(); return; }
+  if (d.kuni) { STATE.kyo.uni = d.kuni; STATE.kyo.fq = ''; rerenderTab(); window.scrollTo({ top: 0 }); return; }
+  if (d.ics) { STATE.icsTypes[t.checked ? 'add' : 'delete'](d.ics); return; }
+  if (d.ttab) { STATE.teacher.tab = d.ttab; render(); return; }
+  if (d.sel) { STATE.teacher.sel[t.checked ? 'add' : 'delete'](d.sel); const b = $('[data-act="tprint"]'); if (b) b.textContent = `選んだ生徒の日程表PDF（${STATE.teacher.sel.size}人）`; return; }
+  if (d.detail) { STATE.teacher.detail = d.detail; render(); return; }
+  const act = d.act; if (!act) return;
+  const pickEl = t.closest('.pick'); const pi = pickEl ? +pickEl.dataset.i : -1;
+  switch (act) {
+    case 'tlogin': STATE.view = 'teacher'; render(); break;
+    case 'logout': if (STATE.me) storeMe(); STATE.me = null; STATE.view = 'login'; render(); window.scrollTo({ top: 0 }); break;
+    case 'resume': { const me = loadMe(); if (me) startStudent(me, '続きから開きました'); break; }
+    case 'restore': {
+      const v = ($('#r-code') || {}).value || '';
+      try { const me = await decodeCode(v); if (me.year && M.settings.year && String(me.year) !== String(M.settings.year)) toast(`${me.year}年度のコードです`); startStudent(me, `${me.name} さんの入力を復元しました`); }
+      catch (ex) { $('#l-err').textContent = '復元コードを読み取れませんでした。JKP… から最後まで、途中で切れずに貼れているか確認してください。'; }
+      break;
+    }
+    case 'submit': {
+      STATE.code = await encodeCode(STATE.me);
+      if (!STATE.me.picks.length) { toast('先に受験校を追加してください'); break; }
+      const url = formUrl(STATE.me, STATE.code);
+      if (url) { STATE.me.submittedAt = STATE.me.updated; storeMe(); window.open(url, '_blank'); }
+      else { const ok = await copyText(STATE.code); STATE.me.submittedAt = STATE.me.updated; storeMe(); toast(ok ? '提出用コードをコピーしました。先生の指示した場所に貼ってください' : '下の復元コードを選んでコピーしてください'); if (STATE.tab !== 'plan') { STATE.tab = 'plan'; render(); } }
+      const st = $('#submitState'); if (st) st.innerHTML = submitStateHTML();
+      break;
+    }
+    case 'copycode': { STATE.code = await encodeCode(STATE.me); const ok = await copyText(STATE.code); toast(ok ? '復元コードをコピーしました' : 'コードを選んでコピーしてください'); break; }
+    case 'imp-go': importTexts([($('#imp-text') || {}).value || '']); break;
+    case 'imp-clear': STATE.teacher.students = []; STATE.teacher.sel = new Set(); STATE.teacher.imp = ''; render(); break;
+    case 'del': if (pi >= 0) { STATE.me.picks.splice(pi, 1); touch(); rerenderTab(); refreshCounts(); } break;
+    case 'uniback': STATE.search.uni = ''; rerenderTab(); break;
+    case 'kyoback': STATE.kyo.uni = ''; rerenderTab(); break;
+    case 'pdf': doPrint([STATE.me]); break;
+    case 'ics': {
+      const ps = activePicks(); if (!ps.length) { toast('先に受験校を追加してください'); break; }
+      download(`受験予定_${STATE.me.cls}_${STATE.me.no}.ics`, buildICS(STATE.me, STATE.icsTypes), 'text/calendar;charset=utf-8'); toast('カレンダーファイルを書き出しました'); break;
+    }
+    case 'selall': { const list = tFiltered(); list.forEach(s => STATE.teacher.sel[t.checked ? 'add' : 'delete'](s.cls + '#' + s.no)); render(); break; }
+    case 'tprint': { const list = STATE.teacher.students.filter(s => STATE.teacher.sel.has(s.cls + '#' + s.no)); if (!list.length) { toast('左のチェックで生徒を選んでください'); break; } doPrint(list.sort((a, b) => String(a.cls).localeCompare(String(b.cls), 'ja', { numeric: true }) || a.no - b.no)); break; }
+    case 'tprint1': { const s = STATE.teacher.students.find(x => x.cls + '#' + x.no === d.key); if (s) doPrint([s]); break; }
+    case 'closedetail': if (e.target === t || t.matches('button')) { STATE.teacher.detail = null; render(); } break;
+    case 'csv-picks': download(`受験校一覧_${stamp8()}.csv`, csv(picksCSVRows(tFiltered())), 'text/csv'); break;
+    case 'csv-students': download(`生徒一覧_${stamp8()}.csv`, csv(studentsCSVRows(tFiltered())), 'text/csv'); break;
+    case 'csv-days': download(`日別受験者_${stamp8()}.csv`, csv(daysCSVRows(tFiltered())), 'text/csv'); break;
+    case 'dl-master': saveMasterXlsx(M.rows, `master_${stamp8()}.xlsx`); break;
+    case 'dl-conv': saveMasterXlsx(STATE.teacher.conv.rows, `master_KeiNet変換_${stamp8()}.xlsx`); break;
+  }
+});
+const FILTER_INPUTS = ['s-q', 's-fq', 'k-fq', 'c-q', 't-q'];
+document.addEventListener('compositionend', e => { if (FILTER_INPUTS.includes(e.target.id)) onInput(e.target, false); });
+document.addEventListener('input', e => onInput(e.target, e.isComposing));
+function onInput(t, composing) {
+  const d = t.dataset;
+  if (composing && FILTER_INPUTS.includes(t.id)) return;
+  if (t.id === 's-q') { STATE.search.q = t.value; keepFocus('s-q', rerenderTab); return; }
+  if (t.id === 's-fq') { STATE.search.fq = t.value; clearTimeout(t._tm); t._tm = setTimeout(() => keepFocus('s-fq', rerenderTab), 250); return; }
+  if (t.id === 'k-fq') { STATE.kyo.fq = t.value; clearTimeout(t._tm); t._tm = setTimeout(() => keepFocus('k-fq', rerenderTab), 250); return; }
+  if (t.id === 'c-q') { STATE.cal.q = t.value; clearTimeout(t._tm); t._tm = setTimeout(() => keepFocus('c-q', rerenderTab), 250); return; }
+  if (t.id === 't-q') { STATE.teacher.q = t.value; keepFocus('t-q', render); return; }
+  if (!STATE.me) return;
+  const pf = STATE.me.profile;
+  if (d.p) { pf[d.p] = t.type === 'checkbox' ? t.checked : t.value; touch(); return; }
+  if (d.ext !== undefined) { pf.ext = pf.ext || [{}, {}]; pf.ext[+d.ext] = pf.ext[+d.ext] || {}; pf.ext[+d.ext][d.k] = t.value; touch(); return; }
+  if (d.kyo) {
+    pf.kyo = pf.kyo || {}; pf.kyo[d.kyo] = pf.kyo[d.kyo] || {}; pf.kyo[d.kyo][d.k] = d.k === 'n' ? t.value : t.value.replace(/[^\d.]/g, ''); touch();
+    const r = kyoTotals(pf); $('#kt-max').textContent = r.mx || ''; $('#kt-tg').textContent = r.mx ? `${r.tg}（${Math.round(r.tg / r.mx * 100)}%）` : ''; $('#kt-mk').textContent = r.mkMax ? `${r.mk}（${Math.round(r.mk / r.mkMax * 100)}%）` : ''; $('#kt-bar').style.width = (r.mx ? Math.round(r.tg / r.mx * 100) : 0) + '%';
+    return;
+  }
+  if (d.f === 'memo') { const el = t.closest('.pick'); STATE.me.picks[+el.dataset.i].memo = t.value; touch(); }
+}
+document.addEventListener('change', e => {
+  const t = e.target; const d = t.dataset;
+  if (t.id === 't-cls') { STATE.teacher.cls = t.value; render(); return; }
+  if (t.id === 'kn-files' && t.files.length) { convertKeinet([...t.files]); return; }
+  if (t.id === 'imp-files' && t.files.length) { importFiles([...t.files]); return; }
+  if (!STATE.me) return;
+  if (d.p && t.tagName === 'SELECT') { STATE.me.profile[d.p] = t.value; touch(); return; }
+  if (d.ext !== undefined && t.tagName === 'SELECT') { const pf = STATE.me.profile; pf.ext = pf.ext || [{}, {}]; pf.ext[+d.ext] = pf.ext[+d.ext] || {}; pf.ext[+d.ext].type = t.value; touch(); return; }
+  if (['pref', 'status', 'date'].includes(d.f)) {
+    const el = t.closest('.pick'); const p = STATE.me.picks[+el.dataset.i]; p[d.f] = t.value; touch();
+    const y = window.scrollY; rerenderTab(); window.scrollTo({ top: y }); refreshCounts();
+    const hd = $('.strip'); if (hd) hd.outerHTML = summaryHTML(STATE.me);
+  }
+});
+
+/* ============================================================
+   起動
+   ============================================================ */
+(async function boot() {
+  const app = $('#app');
+  if (typeof XLSX === 'undefined') { app.innerHTML = `<div class="login"><h1>受験校プランナー</h1><p class="err-msg">表計算ライブラリを読み込めませんでした。インターネットに接続して再読み込みしてください。</p></div>`; return; }
+  try { await loadMaster(); render(); }
+  catch (e) {
+    app.innerHTML = `<div class="login"><h1>受験校プランナー</h1><p class="err-msg">大学データ（${esc(C.MASTER_URL)}）を読み込めませんでした。</p>
+      <p class="note">パソコンでファイルを直接開いている場合は、下から master.xlsx を選ぶと動作を確認できます。GitHub Pagesに置いた場合は data フォルダに master.xlsx があるか確認してください。</p>
+      <input type="file" id="mf" accept=".xlsx" class="inp"></div>`;
+    $('#mf').addEventListener('change', async ev => { const f = ev.target.files[0]; if (!f) return; ingestWorkbook(XLSX.read(await f.arrayBuffer(), { type: 'array' })); render(); });
+  }
+})();
+</script>
+</body>
+</html>
