@@ -216,6 +216,9 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .pcalwrap .cal .day.pad{background:transparent;border-color:transparent}
 .pcalwrap .cal .day.kyo{background:var(--c-kyo-soft)}
 
+.aiout{white-space:pre-wrap;background:var(--sunken);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;margin-top:10px;font-size:14px;line-height:1.8}
+.aiout .aih{display:block;font-family:var(--f-head);font-size:15px;margin-top:6px;color:var(--ai)}
+
 /* search */
 .filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
 .fchip{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 12px;cursor:pointer;font-size:13px}
@@ -504,7 +507,7 @@ async function copyText(text) {
 /* ============================================================
    状態
    ============================================================ */
-const STATE = { view: 'login', tab: 'plan', me: null, code: '', saveState: '', newConfirm: false,
+const STATE = { view: 'login', tab: 'plan', me: null, code: '', saveState: '', newConfirm: false, pdfCal: false,
   search: { grp: '', q: '', uni: '', kinds: new Set(KINDS.filter(k => k !== '共テ利用')), fq: '' },
   cal: { grps: new Set(), q: '', day: '', focus: '', field: '', kinds: new Set(['一般', '共テ併用', '国公立']) }, planView: 'list',
   kyo: { grp: '', uni: '', fq: '' },
@@ -741,9 +744,10 @@ function planHTML() {
           <p class="note">このコードをメモやスクショで残しておくと、別の端末や入力が消えたときに、最初の画面の「復元コードから再開」で元に戻せます。</p></details>
       </div>
       <div class="panel export"><h3>書き出す</h3>
-        <button class="btn primary" data-act="pdfcal">カレンダーをPDFに（横向き）</button>
-        <button class="btn" data-act="pdf">一覧表＋カレンダーをPDFに</button>
-        <p class="note" style="margin:0">印刷画面で「PDFに保存」を選ぶとPDFになります。カレンダーは1か月1ページで、大学名は略記です。</p>
+        <button class="btn primary" data-act="pdf">受験校一覧をPDFに</button>
+        <label style="font-size:13px"><input type="checkbox" id="pdf-withcal"${STATE.pdfCal ? ' checked' : ''}> カレンダーのページも付ける</label>
+        <button class="btn" data-act="pdfcal">カレンダーだけをPDFに（横向き）</button>
+        <p class="note" style="margin:0">印刷画面で「PDFに保存」を選ぶとPDFになります。カレンダーだけのPDFは1か月1ページで、大学名は略記です。</p>
         <button class="btn" data-act="ics">カレンダーに追加（.ics）</button>
         <div class="opts">${Object.entries(EV).map(([k, l]) => `<label><input type="checkbox" data-ics="${k}"${STATE.icsTypes.has(k) ? ' checked' : ''}> ${l}</label>`).join('')}</div>
         <p class="note" style="margin:0">iPhoneはダウンロード後に「カレンダーに追加」。Googleカレンダーはパソコンの「設定→インポート」で読み込めます。</p>
@@ -958,7 +962,7 @@ function profileHTML() {
       <div class="field"><label for="p-budget">受験料・遠征の上限など（家庭と相談したこと）</label><input id="p-budget" class="inp" data-p="budget" value="${esc(pf.budget || '')}" placeholder="例：受験料は合計25万円まで、地方会場は使わない"></div>
     </section>
     <section class="panel"><h3>先生への連絡・メモ</h3>
-      <div class="field"><label for="p-memo">相談したいこと</label><textarea id="p-memo" class="inp" rows="6" data-p="memo" placeholder="例：2/5と2/7どちらを受けるか迷っています">${esc(pf.memo || '')}</textarea></div>
+      <div class="field"><label for="p-memo">不安なこと・先生に相談したいこと</label><textarea id="p-memo" class="inp" rows="6" data-p="memo" placeholder="例：2/5と2/7どちらを受けるか迷っています">${esc(pf.memo || '')}</textarea></div>
     </section>
   </div>`;
 }
@@ -1101,25 +1105,25 @@ function tFiltered() {
 function teacherHTML() {
   const t = STATE.teacher;
   const classes = [...new Set(t.students.map(s => s.cls))].sort((a, b) => String(a).localeCompare(String(b), 'ja', { numeric: true }));
-  const tabs = [['list', '生徒一覧'], ['days', '日別の受験者'], ['data', '大学データ']];
+  const tabs = [['list', '生徒一覧'], ['days', '日別の受験者'], ['ai', 'AIアドバイス設定'], ['data', '大学データ']];
   return headerHTML('<span><b>教員ページ</b></span>', `<button class="btn sm ghost" data-act="logout">終了</button>`) +
     `<div class="wrap"><nav class="tabs">${tabs.map(([k, l]) => `<button class="tab" aria-selected="${t.tab === k}" data-ttab="${k}">${l}</button>`).join('')}</nav>
-    ${t.tab !== 'data' ? importPanelHTML() : ''}
-    ${t.tab !== 'data' ? `<div class="tools"><select class="inp" id="t-cls" style="width:auto"><option value="">全クラス</option>${classes.map(c => `<option${t.cls === c ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select>
+    ${['list', 'days'].includes(t.tab) ? importPanelHTML() : ''}
+    ${['list', 'days'].includes(t.tab) ? `<div class="tools"><select class="inp" id="t-cls" style="width:auto"><option value="">全クラス</option>${classes.map(c => `<option${t.cls === c ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select>
       <input class="inp" id="t-q" style="width:auto;flex:1 1 160px" placeholder="氏名で検索" value="${esc(t.q)}"></div>` : ''}
-    ${t.tab === 'list' ? tListHTML() : t.tab === 'days' ? tDaysHTML() : tDataHTML()}</div>
+    ${t.tab === 'list' ? tListHTML() : t.tab === 'days' ? tDaysHTML() : t.tab === 'ai' ? aiSettingsHTML() : tDataHTML()}</div>
     ${t.detail ? tDetailHTML(t.detail) : ''}`;
 }
 function tListHTML() {
   const t = STATE.teacher; const list = tFiltered();
   const allSel = list.length && list.every(s => t.sel.has(s.cls + '#' + s.no));
   return `<div class="tools"><button class="btn" data-act="csv-picks">受験校一覧CSV（1行1受験）</button><button class="btn" data-act="csv-students">生徒一覧CSV（1行1生徒）</button>
-    <button class="btn primary" data-act="tprint">選んだ生徒の受験校一覧PDF・1人1枚（${[...t.sel].length}人）</button><span class="note">CSVは表示中のクラス・検索結果が対象です。</span></div>
+    <button class="btn primary" data-act="tprint">選んだ生徒の受験校一覧PDF・1人1枚（${[...t.sel].length}人）</button><label style="font-size:13px"><input type="checkbox" id="t-withcal"${STATE.pdfCal ? ' checked' : ''}> カレンダーも付ける</label><span class="note">CSVは表示中のクラス・検索結果が対象です。</span></div>
     <div class="tbl-wrap" style="border:1px solid var(--line);border-radius:var(--r)"><table class="ttable"><thead><tr><th><input type="checkbox" data-act="selall"${allSel ? ' checked' : ''} aria-label="すべて選択"></th><th>組</th><th>番号</th><th>氏名</th><th>受験校</th><th>一般/併用</th><th>共テ利用</th><th>国公立</th><th>英検</th><th>共テ目標</th><th>第1志望</th><th>更新</th><th></th></tr></thead><tbody>
     ${list.map(s => { const ps = (s.picks || []).filter(p => p.status !== '取りやめ'); const k = n => ps.filter(p => n.includes(exOf(p).kind)).length; const r = kyoTotals(s.profile); const key = s.cls + '#' + s.no;
       return `<tr><td><input type="checkbox" data-sel="${esc(key)}"${t.sel.has(key) ? ' checked' : ''} aria-label="選択"></td><td>${esc(s.cls)}</td><td class="num">${esc(s.no)}</td><td><b>${esc(s.name)}</b></td><td class="num">${ps.length}</td><td class="num">${k(['一般', '共テ併用'])}</td><td class="num">${k(['共テ利用'])}</td><td class="num">${k(['国公立'])}</td>
       <td>${esc((s.profile || {}).eiken || '')}${(s.profile || {}).cse ? ` <span class="num">${esc(s.profile.cse)}</span>` : ''}</td><td class="num">${r.mx ? `${r.tg}/${r.mx}` : ''}</td><td style="max-width:220px;overflow:hidden;text-overflow:ellipsis">${esc((s.profile || {}).hope1 || '')}</td><td class="num">${s.updated ? esc(String(s.updated).slice(5, 16).replace('T', ' ')) : ''}</td>
-      <td><button class="btn sm" data-detail="${esc(key)}">詳細</button></td></tr>`; }).join('') || '<tr><td colspan="13">上の欄から提出データを読み込んでください。</td></tr>'}
+      <td><button class="btn sm" data-detail="${esc(key)}">詳細</button> <button class="btn sm primary" data-act="ai-copy" data-key="${esc(key)}">AI相談文をコピー</button></td></tr>`; }).join('') || '<tr><td colspan="13">上の欄から提出データを読み込んでください。</td></tr>'}
     </tbody></table></div>`;
 }
 function tDetailHTML(key) {
@@ -1132,8 +1136,107 @@ function tDetailHTML(key) {
       <div>${kyoTotalText(pf)}（共テ${pf.kyoTake === false ? '受験しない' : '受験する'}）</div><div>第1志望：${esc(pf.hope1 || '—')}　系統：${esc(pf.field || '—')}</div>${pf.budget ? `<div>家庭との相談：${esc(pf.budget)}</div>` : ''}${pf.memo ? `<div class="notice info" style="margin-bottom:0">生徒から：${esc(pf.memo)}</div>` : ''}</div>
     <div class="tbl-wrap"><table class="ex"><thead><tr><th>試験日</th><th>大学・学部・学科</th><th>方式</th><th>出願締切</th><th>発表</th><th>手続</th><th>志望度</th><th>状況</th><th>メモ</th></tr></thead><tbody>
     ${ps.map(p => { const x = exOf(p); const w = warningsFor(p, ps.filter(q => q.status !== '取りやめ')).filter(w => w.bad); return `<tr><td class="d">${x.kind === '共テ利用' ? '共テ利用' : fmt(x.date)}</td><td>${esc(label(x))}${w.length ? `<div class="w bad">${esc(w.map(z => z.t).join(' / '))}</div>` : ''}</td><td>${esc(x.met)}</td><td class="d">${fmt(x.close)}</td><td class="d">${fmt(x.ann)}</td><td class="d">${fmt(x.proc)}</td><td>${esc(p.pref)}</td><td>${esc(p.status)}</td><td>${esc(p.memo || '')}</td></tr>`; }).join('') || '<tr><td colspan="9">未登録</td></tr>'}
-    </tbody></table></div></div></div>`;
+    </tbody></table></div>
+    ${aiPanelHTML(key, s)}</div></div>`;
 }
+/* ============================================================
+   AIアドバイス（教員ページのみ）
+   ============================================================ */
+const AI_KEY = 'jukenko_planner_ai';
+const AI_MODELS = [['claude-sonnet-5-5', 'Claude Sonnet 5.5（標準）'], ['claude-opus-5-5', 'Claude Opus 5.5（じっくり）'], ['claude-haiku-5-5', 'Claude Haiku 5.5（速い・安い）']];
+const AI_DEFAULT_COMMON = '本校は私立高校。生徒の負担（連続受験は3日まで）と受験料の総額にも配慮してください。第1志望への挑戦は尊重しつつ、合格を確保できる併願の組み方を具体的に示してください。';
+function loadAI() { let a = {}; try { a = JSON.parse(localStorage.getItem(AI_KEY)) || {}; } catch (e) { } return Object.assign({ key: '', model: AI_MODELS[0][0], common: AI_DEFAULT_COMMON, hideName: true }, a); }
+function saveAI(a) { try { localStorage.setItem(AI_KEY, JSON.stringify(a)); } catch (e) { } }
+function aiSettingsHTML() {
+  const a = loadAI();
+  return `<div class="pf">
+    <section class="panel"><h3>AIへの共通の指示</h3>
+      <p class="note" style="margin-top:0">全員の相談に毎回つける指示です。学校の方針や、先生として重視していることを書いてください。</p>
+      <textarea class="inp" rows="7" data-ai="common" id="ai-common">${esc(a.common)}</textarea>
+      <label style="font-size:13px;display:block;margin-top:8px"><input type="checkbox" data-ai="hideName"${a.hideName ? ' checked' : ''}> 氏名と組・番号をAIに送らない（おすすめ）</label>
+    </section>
+    <section class="panel"><h3>使い方は2通り</h3>
+      <p style="margin:0 0 6px;font-size:14px"><b>A. 相談文をコピーしてClaudeに貼る</b>（設定不要・追加料金なし）<br>生徒の詳細画面で「相談文をコピー」を押し、いつも使っているClaudeのチャットに貼り付けます。</p>
+      <p style="margin:0;font-size:14px"><b>B. このページの中でAIに答えてもらう</b>（APIキーが必要・従量課金）<br>Claude Console（platform.claude.com）でAPIキーを作り、下に入れます。1人分の相談は数円程度です。</p>
+    </section>
+    <section class="panel"><h3>APIキー（Bを使う場合）</h3>
+      <p class="note" style="margin-top:0">キーはこのパソコンのこのブラウザにだけ保存され、GitHubのページには含まれません。共用のパソコンでは使わないでください。</p>
+      <div class="tools"><input class="inp" type="password" id="ai-key" data-ai="key" placeholder="${a.key ? '保存済み（入れ直すと上書き）' : 'sk-ant-…'}" style="flex:1 1 240px" autocomplete="off">
+      ${a.key ? '<button class="btn ghost danger" data-act="ai-clearkey">キーを消す</button>' : ''}</div>
+      <div class="field"><label for="ai-model">モデル</label><select id="ai-model" class="inp" data-ai="model">${AI_MODELS.map(([v, l]) => `<option value="${v}"${a.model === v ? ' selected' : ''}>${l}</option>`).join('')}</select></div>
+    </section></div>`;
+}
+function aiState(key) { const t = STATE.teacher; t.ai = t.ai || {}; return t.ai[key] = t.ai[key] || { instr: '', out: '', busy: false, err: '' }; }
+function aiPanelHTML(key, s) {
+  const st = aiState(key); const a = loadAI();
+  return `<section class="panel" style="margin-top:14px"><h3>AIに受験の相談をする</h3><p class="note" style="margin-top:0">相談文に入る内容：受験予定（日程・方式・偏差値帯・志望度）、共テの目標点と模試、英検・外部試験、第1志望、本人の不安、家庭との相談事項、日程の注意点、先生の指示。</p>
+    <div class="field"><label for="ai-instr">この生徒についての指示（任意）</label>
+      <textarea id="ai-instr" class="inp" rows="3" data-aikey="${esc(key)}" placeholder="例：本人は理科大が第1志望だが、模試はB判定止まり。保護者は浪人不可の方針。安全校を2校入れたい。">${esc(st.instr)}</textarea></div>
+    <div class="tools"><button class="btn primary" data-act="ai-copy" data-key="${esc(key)}">AI相談文をコピー</button>
+      ${a.key ? `<button class="btn" data-act="ai-run" data-key="${esc(key)}"${st.busy ? ' disabled' : ''}>${st.busy ? '考えています…' : 'このページでAIに相談（API）'}</button>` : ''}
+      <span class="note">コピーした文をClaudeのチャットに貼ると、受験校・共テ・英検・不安なことをふまえたアドバイスが返ってきます。</span></div>
+    ${st.err ? `<div class="notice">${esc(st.err)}</div>` : ''}
+    ${st.out ? `<div class="aiout">${aiFormat(st.out)}</div><div class="tools" style="margin-top:8px"><button class="btn sm" data-act="ai-copyout" data-key="${esc(key)}">回答をコピー</button><span class="note">AIの回答は参考意見です。日程や入試制度は募集要項で確認してください。</span></div>` : ''}
+  </section>`;
+}
+function aiFormat(t) {
+  return esc(t).replace(/^#{1,3} ?(.+)\n?/gm, '<b class="aih">$1</b>').replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+}
+function studentBrief(s, hide) {
+  const pf = s.profile || {}; const r = kyoTotals(pf);
+  const ps = (s.picks || []).filter(p => p.status !== '取りやめ');
+  const L = [];
+  L.push(`今日の日付：${today}（${M.settings.year}年度入試）`);
+  L.push(hide ? '生徒：（匿名）' : `生徒：${clsL(s.cls)} ${s.no}番 ${s.name}`);
+  L.push(`英検：${pf.eiken || '未入力'}${pf.cse ? `（CSE ${pf.cse}）` : ''}${pf.eikenPlan ? `／今後の受験予定：${pf.eikenPlan}` : ''}`);
+  const ext = (pf.ext || []).filter(e => e && e.type); if (ext.length) L.push(`その他の英語試験：${ext.map(e => `${e.type} ${e.score || ''}`).join('、')}`);
+  L.push(`共通テスト：${pf.kyoTake === false ? '受験しない' : '受験する'}`);
+  const kt = (pf.kyo || {}); const subj = KYO_SUBJ.filter(([k]) => kt[k] && (kt[k].t || kt[k].m)).map(([k, l, full]) => `${l}${kt[k].n ? `(${kt[k].n})` : ''} 目標${kt[k].t || '-'}/${full}${kt[k].m ? ` 模試${kt[k].m}` : ''}`);
+  if (subj.length) L.push(`共テ目標・模試：${subj.join('、')}（合計 目標${r.tg}/${r.mx}${r.mkMax ? `、模試${r.mk}/${r.mkMax}` : ''}）`);
+  L.push(`第1志望：${pf.hope1 || '未入力'}／志望系統：${pf.field || '未入力'}`);
+  if (pf.budget) L.push(`家庭と相談していること：${pf.budget}`);
+  if (pf.memo) L.push(`本人の不安・相談したいこと：${pf.memo}`);
+  L.push('', '受験予定（試験日順）：');
+  ps.slice().sort((a, b) => (exOf(a).date || exOf(a).ann || '9').localeCompare(exOf(b).date || exOf(b).ann || '9')).forEach(p => {
+    const x = exOf(p);
+    L.push(`- ${x.kind === '共テ利用' ? '共テ利用' : fmt(x.date)}｜${label(x)}｜${x.met}（${x.kind}）｜偏差値帯 ${x.rank || '不明'}｜出願締切 ${fmt(x.close) || '要確認'}｜発表 ${fmt(x.ann) || '要確認'}｜手続締切 ${fmt(x.proc) || '要確認'}｜志望度 ${p.pref}｜状況 ${p.status}${p.memo ? `｜本人メモ：${p.memo}` : ''}`);
+  });
+  if (!ps.length) L.push('（まだ登録なし）');
+  const warns = [...new Set(ps.flatMap(p => warningsFor(p, ps).map(w => w.t)))];
+  if (warns.length) L.push('', 'システムが検出した注意点：', ...warns.map(w => '- ' + w));
+  return L.join('\n');
+}
+const AI_SYSTEM = `あなたは日本の高校で進路指導を担当する教員の補助をする、大学受験の専門家です。
+生徒の受験予定・共通テストの目標点・英語資格・本人の不安をもとに、担任が面談で使えるアドバイスを日本語で書いてください。
+次の見出しで、簡潔に具体的に書くこと。
+## 全体の所見
+## 併願の組み方（挑戦校・実力相応校・安全校のバランス、足りない・多すぎる点）
+## 日程上の注意（重複・連続受験・出願締切・入学手続締切と他校の発表の前後関係）
+## 共通テスト・英語資格の活かし方（共テ利用・英語外部試験利用方式など）
+## 本人の不安への声かけ案（面談でそのまま使える言い方を2〜3文）
+注意：偏差値帯は河合塾のボーダー帯で、合否を断定しないこと。日程は「要確認」の項目を断定しないこと。データにない大学の入試制度を推測で書くときは、そうと分かるように書くこと。`;
+function aiPrompt(s, instr) {
+  const a = loadAI();
+  return `${a.common ? `【先生からの共通の指示】\n${a.common}\n\n` : ''}${instr ? `【この生徒についての指示】\n${instr}\n\n` : ''}【生徒の情報】\n${studentBrief(s, a.hideName)}`;
+}
+async function aiRun(key) {
+  const s = STATE.teacher.students.find(x => x.cls + '#' + x.no === key); if (!s) return;
+  const a = loadAI(); const st = aiState(key);
+  if (!a.key) { st.err = 'APIキーが設定されていません。「AIアドバイス設定」タブで入れるか、「相談文をコピー」を使ってください。'; render(); return; }
+  st.busy = true; st.err = ''; render();
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': a.key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({ model: a.model, max_tokens: 2500, system: AI_SYSTEM, messages: [{ role: 'user', content: aiPrompt(s, st.instr) }] })
+    });
+    const j = await res.json();
+    if (!res.ok) throw new Error(res.status === 401 ? 'APIキーが正しくありません。' : res.status === 429 ? '利用上限に達しました。少し待ってから試してください。' : (j.error && j.error.message) || ('エラー ' + res.status));
+    st.out = (j.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n');
+  } catch (e) { st.err = 'AIに相談できませんでした：' + e.message; }
+  st.busy = false; render();
+}
+
 function tDaysHTML() {
   const by = {};
   for (const s of tFiltered()) for (const p of (s.picks || [])) {
@@ -1303,20 +1406,24 @@ document.addEventListener('click', async e => {
       break;
     }
     case 'copycode': { STATE.code = await encodeCode(STATE.me); const ok = await copyText(STATE.code); toast(ok ? '復元コードをコピーしました' : 'コードを選んでコピーしてください'); break; }
+    case 'ai-run': aiRun(d.key); break;
+    case 'ai-copy': { const s = STATE.teacher.students.find(x => x.cls + '#' + x.no === d.key); if (!s) break; const txt = AI_SYSTEM + '\n\n' + aiPrompt(s, aiState(d.key).instr); const ok = await copyText(txt); toast(ok ? '相談文をコピーしました。Claudeのチャットに貼り付けてください' : 'コピーできませんでした'); break; }
+    case 'ai-copyout': { const ok = await copyText(aiState(d.key).out); toast(ok ? '回答をコピーしました' : 'コピーできませんでした'); break; }
+    case 'ai-clearkey': { const a = loadAI(); a.key = ''; saveAI(a); render(); toast('APIキーを消しました'); break; }
     case 'imp-go': importTexts([($('#imp-text') || {}).value || '']); break;
     case 'imp-clear': try { sessionStorage.removeItem(T_KEY); } catch (ex) { } STATE.teacher.students = []; STATE.teacher.sel = new Set(); STATE.teacher.imp = ''; render(); break;
     case 'del': if (pi >= 0) { STATE.me.picks.splice(pi, 1); touch(); rerenderTab(); refreshCounts(); } break;
     case 'uniback': STATE.search.uni = ''; rerenderTab(); break;
     case 'kyoback': STATE.kyo.uni = ''; rerenderTab(); break;
-    case 'pdf': doPrint([STATE.me]); break;
+    case 'pdf': doPrint([STATE.me], STATE.pdfCal ? '' : 'list'); break;
     case 'pdfcal': if (!activePicks().length) { toast('先に受験校を追加してください'); break; } doPrint([STATE.me], 'cal'); break;
     case 'ics': {
       const ps = activePicks(); if (!ps.length) { toast('先に受験校を追加してください'); break; }
       download(`受験予定_${STATE.me.cls}_${STATE.me.no}.ics`, buildICS(STATE.me, STATE.icsTypes), 'text/calendar;charset=utf-8'); toast('カレンダーファイルを書き出しました'); break;
     }
     case 'selall': { const list = tFiltered(); list.forEach(s => STATE.teacher.sel[t.checked ? 'add' : 'delete'](s.cls + '#' + s.no)); render(); break; }
-    case 'tprint': { const list = STATE.teacher.students.filter(s => STATE.teacher.sel.has(s.cls + '#' + s.no)); if (!list.length) { toast('左のチェックで生徒を選んでください'); break; } doPrint(list.sort((a, b) => String(a.cls).localeCompare(String(b.cls), 'ja', { numeric: true }) || a.no - b.no), 'list'); break; }
-    case 'tprint1': { const s = STATE.teacher.students.find(x => x.cls + '#' + x.no === d.key); if (s) doPrint([s], 'list'); break; }
+    case 'tprint': { const list = STATE.teacher.students.filter(s => STATE.teacher.sel.has(s.cls + '#' + s.no)); if (!list.length) { toast('左のチェックで生徒を選んでください'); break; } doPrint(list.sort((a, b) => String(a.cls).localeCompare(String(b.cls), 'ja', { numeric: true }) || a.no - b.no), STATE.pdfCal ? '' : 'list'); break; }
+    case 'tprint1': { const s = STATE.teacher.students.find(x => x.cls + '#' + x.no === d.key); if (s) doPrint([s], STATE.pdfCal ? '' : 'list'); break; }
     case 'closedetail': if (e.target === t || t.matches('button')) { STATE.teacher.detail = null; render(); } break;
     case 'csv-picks': download(`受験校一覧_${stamp8()}.csv`, csv(picksCSVRows(tFiltered())), 'text/csv'); break;
     case 'csv-students': download(`生徒一覧_${stamp8()}.csv`, csv(studentsCSVRows(tFiltered())), 'text/csv'); break;
@@ -1336,6 +1443,8 @@ function onInput(t, composing) {
   if (t.id === 'k-fq') { STATE.kyo.fq = t.value; clearTimeout(t._tm); t._tm = setTimeout(() => keepFocus('k-fq', rerenderTab), 250); return; }
   if (t.id === 'c-q') { STATE.cal.q = t.value; clearTimeout(t._tm); t._tm = setTimeout(() => keepFocus('c-q', rerenderTab), 250); return; }
   if (t.id === 't-q') { STATE.teacher.q = t.value; keepFocus('t-q', render); return; }
+  if (d.aikey) { aiState(d.aikey).instr = t.value; return; }
+  if (t.id === 'ai-common') { const a = loadAI(); a.common = t.value; saveAI(a); return; }
   if (!STATE.me) return;
   const pf = STATE.me.profile;
   if (d.p) { pf[d.p] = t.type === 'checkbox' ? t.checked : t.value; touch(); return; }
@@ -1350,6 +1459,8 @@ function onInput(t, composing) {
 document.addEventListener('change', e => {
   const t = e.target; const d = t.dataset;
   if (t.id === 't-cls') { STATE.teacher.cls = t.value; render(); return; }
+  if (t.id === 'pdf-withcal' || t.id === 't-withcal') { STATE.pdfCal = t.checked; return; }
+  if (t.dataset.ai) { const a = loadAI(); a[t.dataset.ai] = t.type === 'checkbox' ? t.checked : t.value; saveAI(a); if (t.dataset.ai === 'key') { t.value = ''; render(); toast(a.key ? 'APIキーをこの端末に保存しました' : 'APIキーを消しました'); } return; }
   if (t.id === 'kn-files' && t.files.length) { convertKeinet([...t.files]); return; }
   if (t.id === 'imp-files' && t.files.length) { importFiles([...t.files]); return; }
   if (!STATE.me) return;
