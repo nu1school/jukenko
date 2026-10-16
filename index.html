@@ -21,7 +21,7 @@ window.CONFIG = {
   // 画面に出す学校名
   SCHOOL: '',
   // 組の選択肢。空配列なら自由入力
-  CLASSES: ['3-1', '3-2', '3-3', '3-4', '3-5', '3-6', '3-7', '3-8']
+  CLASSES: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
 };
 </script>
 <style>
@@ -337,6 +337,7 @@ function normDate(v) {
   return m ? `${m[1]}-${pad2(m[2])}-${pad2(m[3])}` : '';
 }
 function strHash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(16).padStart(8, '0'); }
+const clsL = c => /^[A-Za-zＡ-Ｚ]$/.test(String(c)) ? `${c}組` : String(c ?? '');
 const normName = s => String(s || '').replace(/[\s　]+/g, '');
 let toastTimer;
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 2600); }
@@ -555,6 +556,25 @@ function submitStateHTML() {
 /* ============================================================
    画面：ログイン
    ============================================================ */
+const UI_KEY = 'jukenko_planner_ui', T_KEY = 'jukenko_planner_teacher';
+function saveUI() {
+  try { localStorage.setItem(UI_KEY, JSON.stringify({ view: STATE.view, tab: STATE.tab, planView: STATE.planView, at: Date.now() })); } catch (e) { }
+  try { if (STATE.view === 'teacher' && STATE.teacher.students.length) sessionStorage.setItem(T_KEY, JSON.stringify(STATE.teacher.students)); } catch (e) { }
+}
+function restoreUI() {
+  let ui = null; try { ui = JSON.parse(localStorage.getItem(UI_KEY)); } catch (e) { }
+  if (!ui || Date.now() - (ui.at || 0) > 12 * 3600e3) return false;
+  if (ui.view === 'student') {
+    const me = loadMe(); if (!me) return false;
+    STATE.planView = ui.planView || 'list'; startStudent(me); STATE.tab = ui.tab || STATE.tab; render(); return true;
+  }
+  if (ui.view === 'teacher') {
+    try { STATE.teacher.students = JSON.parse(sessionStorage.getItem(T_KEY)) || []; } catch (e) { }
+    STATE.view = 'teacher'; render(); return true;
+  }
+  return false;
+}
+window.addEventListener('afterprint', () => { $('#print').innerHTML = ''; render(); });
 function render() {
   const app = $('#app');
   if (!M.loaded) return;
@@ -563,6 +583,7 @@ function render() {
   else if (STATE.view === 'teacher') app.innerHTML = teacherHTML();
   afterRender();
   if (STATE.view === 'student') refreshCode();
+  saveUI();
 }
 function loginHTML() {
   const saved = loadMe();
@@ -572,7 +593,7 @@ function loginHTML() {
   return `<form class="login" id="loginForm" autocomplete="off">
     <h1>受験校プランナー<span class="stamp">${esc(M.settings.year || '')}年度入試</span></h1>
     <p class="sub">${esc(C.SCHOOL || '')} 受験する大学・方式を選んで、日程表とカレンダーを作ります。</p>
-    ${saved ? `<div class="notice info" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="flex:1 1 180px">この端末に <b>${esc(saved.cls)} ${esc(saved.no)}番 ${esc(saved.name)}</b> さんの入力があります。</span><button type="button" class="btn primary" data-act="resume">続きから</button></div>` : ''}
+    ${saved ? `<div class="notice info" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="flex:1 1 180px">この端末に <b>${esc(clsL(saved.cls))} ${esc(saved.no)}番 ${esc(saved.name)}</b> さんの入力があります。</span><button type="button" class="btn primary" data-act="resume">続きから</button></div>` : ''}
     <div class="row2"><div class="field"><label for="l-cls">組</label>${clsInput}</div>
     <div class="field"><label for="l-no">番号</label><input id="l-no" class="inp num" inputmode="numeric" placeholder="例：12"></div></div>
     <div class="field"><label for="l-name">氏名</label><input id="l-name" class="inp" placeholder="例：須藤 太郎"></div>
@@ -617,7 +638,7 @@ function headerHTML(nameLine, right) {
 function studentHTML() {
   const me = STATE.me;
   const tabs = [['plan', '受験予定', activePicks().length], ['uni', '大学から追加'], ['cal', 'カレンダーから追加'], ['kyo', '共テ利用'], ['profile', '進路データ']];
-  return headerHTML(`<span><b>${esc(me.cls)}</b> ${esc(me.no)}番 <b>${esc(me.name)}</b></span>`,
+  return headerHTML(`<span><b>${esc(clsL(me.cls))}</b> ${esc(me.no)}番 <b>${esc(me.name)}</b></span>`,
     `<span class="save" id="save"></span><button class="btn sm primary" data-act="submit">先生に提出</button><button class="btn sm ghost" data-act="logout">終了</button>`) +
     `<div class="wrap">${M.settings.notice ? `<div class="notice info">${esc(M.settings.notice)}${M.settings.updated ? `（データ更新：${fmt(M.settings.updated, false)}）` : ''}</div>` : ''}
     ${summaryHTML(me)}
@@ -964,14 +985,14 @@ function printHTMLFor(st) {
     return h + '</table></div>';
   };
   return `<section class="pp"><h1>${esc(M.settings.year)}年度入試 受験校一覧</h1>
-    <div class="meta"><span>${esc(C.SCHOOL || '')} ${esc(st.cls)} ${esc(st.no)}番　<b>${esc(st.name)}</b></span><span>出力日 ${today.replace(/-/g, '/')}</span></div>
+    <div class="meta"><span>${esc(C.SCHOOL || '')} ${esc(clsL(st.cls))} ${esc(st.no)}番　<b>${esc(st.name)}</b></span><span>出力日 ${today.replace(/-/g, '/')}</span></div>
     <div class="prof"><div>英検：${esc(pf.eiken || '—')}${pf.cse ? `（CSE ${esc(pf.cse)}）` : ''}${ext ? `／${esc(ext)}` : ''}</div><div>共テ目標：${r.mx ? `${r.tg}/${r.mx}点（${Math.round(r.tg / r.mx * 100)}%）` : '—'}${r.mkMax ? `　直近模試 ${r.mk}/${r.mkMax}` : ''}</div>
     <div>第1志望：${esc(pf.hope1 || '—')}</div><div>志望系統：${esc(pf.field || '—')}</div></div>
     <table><thead><tr><th>試験日</th><th>大学・学部・学科</th><th>方式</th><th>出願期間</th><th>合格発表</th><th>手続締切</th><th>志望度</th><th>状況</th></tr></thead><tbody>
     ${rows.map(p => { const x = exOf(p); return `<tr><td class="d">${x.kind === '共テ利用' ? '共テ利用' : (fmt(x.date) || '—')}</td><td>${esc(label(x))}</td><td>${esc(x.met)}<br><small>${esc(x.kind)}</small></td><td class="d">${x.open ? fmt(x.open, false) + '〜' : ''}${fmt(x.close) || '要確認'}</td><td class="d">${fmt(x.ann) || '要確認'}</td><td class="d">${fmt(x.proc) || '要確認'}</td><td class="nw">${esc(p.pref)}</td><td class="nw">${esc(p.status)}${p.memo ? `<br><small style="white-space:normal">${esc(p.memo)}</small>` : ''}</td></tr>`; }).join('') || '<tr><td colspan="8">登録なし</td></tr>'}
     </tbody></table>
     <p class="foot">日程は大学データ（${esc(M.settings.updated || '')}時点）によるものです。出願前に必ず各大学の募集要項で確認してください。</p></section>
-    <section class="pp"><h1>${esc(st.name)}さんの受験カレンダー</h1><div class="meta"><span>◎試験　〆出願締切　発 合格発表　手 手続締切</span><span>${esc(st.cls)} ${esc(st.no)}番</span></div>
+    <section class="pp"><h1>${esc(st.name)}さんの受験カレンダー</h1><div class="meta"><span>◎試験　〆出願締切　発 合格発表　手 手続締切</span><span>${esc(clsL(st.cls))} ${esc(st.no)}番</span></div>
     ${big ? pcal(big, true) : ''}<div class="pm">${months.filter(x => x !== big).map(x => pcal(x, false)).join('')}</div></section>`;
 }
 function calPrintHTMLFor(st) {
@@ -988,7 +1009,7 @@ function calPrintHTMLFor(st) {
     while (cells.length % 7) cells.push('<td class="o"></td>');
     const nRows = cells.length / 7, hmm = Math.min(30, Math.floor(158 / nRows));
     let rowsH = ''; for (let i = 0; i < cells.length; i += 7) rowsH += `<tr style="height:${hmm}mm">${cells.slice(i, i + 7).join('').replace(/<td/g, `<td style="height:${hmm}mm"`)}</tr>`;
-    return `<section class="pp calonly"><div class="meta"><span><b style="font-size:15pt">${y}年${m + 1}月</b>　${esc(st.cls)} ${esc(st.no)}番 ${esc(st.name)}</span><span>◎試験　〆出願締切　発 合格発表　手 手続締切　（出力 ${today.replace(/-/g, '/')}）</span></div>
+    return `<section class="pp calonly"><div class="meta"><span><b style="font-size:15pt">${y}年${m + 1}月</b>　${esc(clsL(st.cls))} ${esc(st.no)}番 ${esc(st.name)}</span><span>◎試験　〆出願締切　発 合格発表　手 手続締切　（出力 ${today.replace(/-/g, '/')}）</span></div>
       <table class="pcal"><tr>${[...WD].map(w => `<th>${w}</th>`).join('')}</tr>${rowsH}</table></section>`;
   }).join('') || `<section class="pp"><h1>${esc(st.name)}さんの受験カレンダー</h1><p>受験予定が登録されていません。</p></section>`;
 }
@@ -1099,7 +1120,7 @@ function tDetailHTML(key) {
   const ps = (s.picks || []).slice().sort((a, b) => (exOf(a).date || exOf(a).ann || '9').localeCompare(exOf(b).date || exOf(b).ann || '9'));
   const pf = s.profile || {};
   return `<div class="drawer" data-act="closedetail"><div class="in" data-stop="1">
-    <div class="uhead"><button class="btn sm" data-act="closedetail">閉じる</button><h2>${esc(s.cls)} ${esc(s.no)}番 ${esc(s.name)}</h2><button class="btn sm primary" data-act="tprint1" data-key="${esc(key)}">PDF</button></div>
+    <div class="uhead"><button class="btn sm" data-act="closedetail">閉じる</button><h2>${esc(clsL(s.cls))} ${esc(s.no)}番 ${esc(s.name)}</h2><button class="btn sm primary" data-act="tprint1" data-key="${esc(key)}">PDF</button></div>
     <div class="panel" style="margin-bottom:12px;font-size:14px"><div>英検：${esc(pf.eiken || '—')} ${pf.cse ? `CSE ${esc(pf.cse)}` : ''} ${(pf.ext || []).filter(e => e.type).map(e => esc(e.type + ' ' + (e.score || ''))).join('、')}</div>
       <div>${kyoTotalText(pf)}（共テ${pf.kyoTake === false ? '受験しない' : '受験する'}）</div><div>第1志望：${esc(pf.hope1 || '—')}　系統：${esc(pf.field || '—')}</div>${pf.budget ? `<div>家庭との相談：${esc(pf.budget)}</div>` : ''}${pf.memo ? `<div class="notice info" style="margin-bottom:0">生徒から：${esc(pf.memo)}</div>` : ''}</div>
     <div class="tbl-wrap"><table class="ex"><thead><tr><th>試験日</th><th>大学・学部・学科</th><th>方式</th><th>出願締切</th><th>発表</th><th>手続</th><th>志望度</th><th>状況</th><th>メモ</th></tr></thead><tbody>
@@ -1115,7 +1136,7 @@ function tDaysHTML() {
   const days = Object.keys(by).sort();
   return `<div class="tools"><button class="btn" data-act="csv-days">日別の受験者CSV</button><span class="note">2月の公欠・出席管理や、同じ日に受験する生徒の確認に使えます。</span></div>
     <div class="daylist">${days.map(d => `<details><summary><b class="num">${fmt(d)}</b><span>${by[d].length}人</span><span class="note">${[...new Set(by[d].map(e => uniName(e.x.uni)))].slice(0, 6).join('・')}${new Set(by[d].map(e => e.x.uni)).size > 6 ? ' ほか' : ''}</span></summary>
-      <div class="names">${by[d].sort((a, b) => String(a.s.cls).localeCompare(String(b.s.cls), 'ja', { numeric: true }) || a.s.no - b.s.no).map(e => `<div>${esc(e.s.cls)} ${esc(e.s.no)}番 ${esc(e.s.name)}：${esc(label(e.x))} ${esc(e.x.met)}</div>`).join('')}</div></details>`).join('') || '<div class="empty">まだ受験予定が登録されていません。</div>'}</div>`;
+      <div class="names">${by[d].sort((a, b) => String(a.s.cls).localeCompare(String(b.s.cls), 'ja', { numeric: true }) || a.s.no - b.s.no).map(e => `<div>${esc(clsL(e.s.cls))} ${esc(e.s.no)}番 ${esc(e.s.name)}：${esc(label(e.x))} ${esc(e.x.met)}</div>`).join('')}</div></details>`).join('') || '<div class="empty">まだ受験予定が登録されていません。</div>'}</div>`;
 }
 function tDataHTML() {
   const cnt = {}; M.rows.forEach(x => cnt[x.conf || '（空欄）'] = (cnt[x.conf || '（空欄）'] || 0) + 1);
@@ -1223,7 +1244,7 @@ function afterRender() {
     }
   }));
 }
-function rerenderTab() { const tb = $('#tabBody'); if (tb) { tb.innerHTML = tabBody(); afterRender(); } else render(); }
+function rerenderTab() { const tb = $("#tabBody"); if (tb) { tb.innerHTML = tabBody(); afterRender(); saveUI(); } else render(); }
 function keepFocus(id, fn) {
   const el = document.getElementById(id); const pos = el ? el.selectionStart : null; fn();
   const n = document.getElementById(id); if (n) { n.focus(); if (pos != null) try { n.setSelectionRange(pos, pos); } catch (e) { } }
@@ -1276,7 +1297,7 @@ document.addEventListener('click', async e => {
     }
     case 'copycode': { STATE.code = await encodeCode(STATE.me); const ok = await copyText(STATE.code); toast(ok ? '復元コードをコピーしました' : 'コードを選んでコピーしてください'); break; }
     case 'imp-go': importTexts([($('#imp-text') || {}).value || '']); break;
-    case 'imp-clear': STATE.teacher.students = []; STATE.teacher.sel = new Set(); STATE.teacher.imp = ''; render(); break;
+    case 'imp-clear': try { sessionStorage.removeItem(T_KEY); } catch (ex) { } STATE.teacher.students = []; STATE.teacher.sel = new Set(); STATE.teacher.imp = ''; render(); break;
     case 'del': if (pi >= 0) { STATE.me.picks.splice(pi, 1); touch(); rerenderTab(); refreshCounts(); } break;
     case 'uniback': STATE.search.uni = ''; rerenderTab(); break;
     case 'kyoback': STATE.kyo.uni = ''; rerenderTab(); break;
@@ -1343,7 +1364,7 @@ window.addEventListener('resize', () => { const n = isNarrow(); if (lastNarrow !
 (async function boot() {
   const app = $('#app');
   if (typeof XLSX === 'undefined') { app.innerHTML = `<div class="login"><h1>受験校プランナー</h1><p class="err-msg">表計算ライブラリを読み込めませんでした。インターネットに接続して再読み込みしてください。</p></div>`; return; }
-  try { await loadMaster(); render(); }
+  try { await loadMaster(); if (!restoreUI()) render(); }
   catch (e) {
     app.innerHTML = `<div class="login"><h1>受験校プランナー</h1><p class="err-msg">大学データ（${esc(C.MASTER_URL)}）を読み込めませんでした。</p>
       <p class="note">パソコンでファイルを直接開いている場合は、下から master.xlsx を選ぶと動作を確認できます。GitHub Pagesに置いた場合は data フォルダに master.xlsx があるか確認してください。</p>
