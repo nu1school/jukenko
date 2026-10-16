@@ -230,6 +230,9 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .chkres p.bad{color:var(--danger)} .chkres p.ok{color:var(--ok)}
 a.btn{text-decoration:none;color:inherit} a.btn.primary{color:var(--ai-ink)}
 
+.modal{position:fixed;inset:0;background:rgba(10,15,25,.45);z-index:60;display:flex;align-items:center;justify-content:center;padding:16px}
+.mdl{background:var(--paper);border-radius:12px;box-shadow:var(--shadow);padding:20px;width:min(560px,100%);max-height:90vh;overflow:auto}
+
 /* search */
 .filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
 .fchip{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 12px;cursor:pointer;font-size:13px}
@@ -517,7 +520,7 @@ function refreshCode() {
   codeTimer = setTimeout(async () => {
     if (!STATE.me) return;
     STATE.code = await encodeCode(STATE.me);
-    const box = $('#codeBox'); if (box) box.value = STATE.code;
+    ['#codeBox', '#codeBoxM'].forEach(sel => { const box = $(sel); if (box) box.value = STATE.code; });
     const st = $('#submitState'); if (st) st.innerHTML = submitStateHTML();
   }, 250);
 }
@@ -531,7 +534,7 @@ function formUrl(me, code) {
 }
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); return true; }
-  catch (e) { const ta = $('#codeBox'); if (ta) { ta.focus(); ta.select(); } return false; }
+  catch (e) { const ta = $('#codeBoxM') || $('#codeBox'); if (ta) { ta.focus(); ta.select(); } return false; }
 }
 
 /* ============================================================
@@ -680,11 +683,23 @@ function studentHTML() {
   const me = STATE.me;
   const tabs = [['plan', '受験予定', activePicks().length], ['uni', '大学から追加'], ['cal', 'カレンダーから追加'], ['kyo', '共テ利用'], ['profile', '進路データ']];
   return headerHTML(`<span><b>${esc(clsL(me.cls))}</b> ${esc(me.no)}番 <b>${esc(me.name)}</b></span>`,
-    `<span class="save" id="save"></span><button class="btn sm primary" data-act="submit">先生に提出</button><button class="btn sm ghost" data-act="logout">終了</button>`) +
+    `<span class="save" id="save"></span><button class="btn sm" data-act="codeopen">復元コード</button><button class="btn sm primary" data-act="submit">先生に提出</button><button class="btn sm ghost" data-act="logout">終了</button>`) +
     `<div class="wrap">${M.settings.notice ? `<div class="notice info">${esc(M.settings.notice)}${M.settings.updated ? `（データ更新：${fmt(M.settings.updated, false)}）` : ''}</div>` : ''}
     ${summaryHTML(me)}
     <nav class="tabs" role="tablist">${tabs.map(([k, l, c]) => `<button class="tab" role="tab" aria-selected="${STATE.tab === k}" data-tab="${k}">${l}${c !== undefined ? `<span class="cnt">${c}</span>` : ''}</button>`).join('')}</nav>
-    <main id="tabBody">${tabBody()}</main></div>`;
+    <main id="tabBody">${tabBody()}</main></div>${STATE.codeOpen ? codeModalHTML() : ''}`;
+}
+function codeModalHTML() {
+  return `<div class="modal" data-act="codeclose"><div class="mdl" role="dialog" aria-label="復元コード">
+    <h2 style="font-size:20px;margin-bottom:6px">復元コード</h2>
+    <p style="margin:0 0 10px;font-size:14px">あなたの入力内容がこのコードにまとまっています。家のパソコンなど<b>別の端末で続きをするとき</b>や、<b>入力が消えたとき</b>は、最初の画面の「復元コードから再開する」にこのコードを貼ってください。</p>
+    <textarea id="codeBoxM" class="inp num" rows="5" readonly style="font-size:11px;word-break:break-all">${esc(STATE.code)}</textarea>
+    <div class="tools" style="margin-top:10px">
+      <button class="btn primary" data-act="copycode">コピー</button>
+      ${navigator.share ? '<button class="btn" data-act="sharecode">自分に送る（AirDrop・メールなど）</button>' : ''}
+      <button class="btn ghost" data-act="codeclose">閉じる</button></div>
+    <p class="note" style="margin-bottom:0">入力を変えるとコードも変わります。続きをする直前に、最新のコードを送ってください。</p>
+  </div></div>`;
 }
 function summaryHTML(me) {
   const ps = activePicks(me); const evs = ps.flatMap(eventsOf);
@@ -1530,6 +1545,9 @@ document.addEventListener('click', async e => {
       const st = $('#submitState'); if (st) st.innerHTML = submitStateHTML();
       break;
     }
+    case 'codeopen': STATE.code = await encodeCode(STATE.me); STATE.codeOpen = true; render(); break;
+    case 'codeclose': if (e.target === t || t.matches('button')) { STATE.codeOpen = false; render(); } break;
+    case 'sharecode': { STATE.code = await encodeCode(STATE.me); try { await navigator.share({ title: '受験校プランナーの復元コード', text: STATE.code }); } catch (ex) { } break; }
     case 'copycode': { STATE.code = await encodeCode(STATE.me); const ok = await copyText(STATE.code); toast(ok ? '復元コードをコピーしました' : 'コードを選んでコピーしてください'); break; }
     case 'ai-copy': { const s = STATE.teacher.students.find(x => x.cls + '#' + x.no === d.key); if (!s) break; const ok = await copyText(studentBrief(s, loadAI().hideName)); toast(ok ? '生徒の情報をコピーしました。Claudeのチャットに貼り付けてください' : 'コピーできませんでした'); break; }
     case 'ai-copytpl': { const ok = await copyText(loadAI().template); toast(ok ? 'テンプレートをコピーしました' : 'コピーできませんでした'); break; }
