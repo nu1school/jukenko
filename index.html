@@ -10,7 +10,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 /* ============================================================
-   設定（ここだけ書き換えれば動きます）
+   設定の初期値（ふだんは教員ページの「システム設定」で変更します）
    ============================================================ */
 window.CONFIG = {
   // 大学データ（Excel）。GitHub Pages に置くなら相対パスのままでOK
@@ -21,7 +21,13 @@ window.CONFIG = {
   // 画面に出す学校名
   SCHOOL: '',
   // 組の選択肢。空配列なら自由入力
-  CLASSES: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
+  CLASSES: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'],
+  // 教員ページのパスワード（ハッシュ）。教員ページの「システム設定」から変更できます（初期値 takumi）
+  TEACHER_PW_HASH: '196bb376a8e3a2f97aea46dcb5ad0a593c16aaf136d48ff20e6da64f810253d5',
+  // 設定ファイルと公開先（教員ページの「システム設定」で保存すると data/config.json が上の値より優先されます）
+  CONFIG_URL: 'data/config.json',
+  GITHUB_REPO: 'nu1school/jukenko',
+  GITHUB_BRANCH: 'main'
 };
 </script>
 <style>
@@ -350,6 +356,25 @@ function normDate(v) {
 }
 function strHash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(16).padStart(8, '0'); }
 const clsL = c => /^[A-Za-zＡ-Ｚ]$/.test(String(c)) ? `${c}組` : String(c ?? '');
+async function sha256(t) { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t)); return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join(''); }
+const GH_KEY = 'jukenko_planner_github_token';
+const ghToken = () => { try { return localStorage.getItem(GH_KEY) || ''; } catch (e) { return ''; } };
+function bufToB64(buf) { const u = new Uint8Array(buf); let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); }
+async function ghFetch(path, opt = {}) {
+  const res = await fetch(`https://api.github.com/repos/${C.GITHUB_REPO}${path}`, Object.assign({}, opt, { headers: Object.assign({ Accept: 'application/vnd.github+json', Authorization: 'Bearer ' + ghToken() }, opt.headers || {}) }));
+  let j = null; try { j = await res.json(); } catch (e) { }
+  if (!res.ok) { const m = res.status === 401 ? 'GitHubのトークンが正しくないか、期限が切れています' : res.status === 403 ? 'このトークンには書き込みの権限がありません' : res.status === 404 ? 'リポジトリが見つからないか、トークンにこのリポジトリへのアクセス権がありません' : ((j && j.message) || ''); throw new Error(`${m}（${res.status}）`); }
+  return j;
+}
+async function ghPutFile(path, b64, message) {
+  let sha;
+  try { sha = (await ghFetch(`/contents/${path}?ref=${C.GITHUB_BRANCH}`)).sha; } catch (e) { if (!/404/.test(e.message)) throw e; }
+  const who = { name: 'jukenko', email: 'jukenko@users.noreply.github.com' };
+  return ghFetch(`/contents/${path}`, { method: 'PUT', body: JSON.stringify({ message, content: b64, sha, branch: C.GITHUB_BRANCH, author: who, committer: who }) });
+}
+async function loadConfigFile() {
+  try { const r = await fetch(C.CONFIG_URL, { cache: 'no-cache' }); if (!r.ok) return; const j = await r.json(); ['SCHOOL', 'CLASSES', 'FORM_URL', 'TEACHER_PW_HASH'].forEach(k => { if (j[k] !== undefined && j[k] !== null) C[k] = j[k]; }); } catch (e) { }
+}
 const normName = s => String(s || '').replace(/[\s　]+/g, '');
 let toastTimer;
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 2600); }
@@ -582,7 +607,7 @@ function restoreUI() {
     const me = loadMe(); if (!me) return false;
     STATE.planView = ui.planView || 'list'; startStudent(me); STATE.tab = ui.tab || STATE.tab; render(); return true;
   }
-  if (ui.view === 'teacher') {
+  if (ui.view === 'teacher' && isTeacherOk()) {
     try { STATE.teacher.students = JSON.parse(sessionStorage.getItem(T_KEY)) || []; } catch (e) { }
     STATE.view = 'teacher'; render(); return true;
   }
@@ -594,7 +619,8 @@ function render() {
   if (!M.loaded) return;
   if (STATE.view === 'login') app.innerHTML = loginHTML();
   else if (STATE.view === 'student') app.innerHTML = studentHTML();
-  else if (STATE.view === 'teacher') app.innerHTML = teacherHTML();
+  else if (STATE.view === 'teacher') app.innerHTML = isTeacherOk() ? teacherHTML() : tloginHTML();
+  else if (STATE.view === 'tlogin') app.innerHTML = tloginHTML();
   afterRender();
   if (STATE.view === 'student') refreshCode();
   saveUI();
@@ -1069,6 +1095,21 @@ function buildICS(st, types) {
 /* ============================================================
    画面：教員
    ============================================================ */
+const TOK_KEY = 'jukenko_planner_teacher_ok';
+function isTeacherOk() { try { return sessionStorage.getItem(TOK_KEY) === C.TEACHER_PW_HASH; } catch (e) { return false; } }
+function tloginHTML() {
+  return `<form class="login" id="tForm" autocomplete="off"><h1>教員ページ</h1><p class="sub">提出データの読み込み、CSV・PDFの出力、AI相談、システム設定ができます。</p>
+    <div class="field"><label for="t-pw">教員パスワード</label><input id="t-pw" class="inp" type="password"></div>
+    <div class="err-msg" id="t-err"></div><button class="btn primary" style="width:100%">ひらく</button>
+    <p style="text-align:right;margin:10px 0 0"><button type="button" class="linkbtn" data-act="tback">生徒のページへ</button></p></form>`;
+}
+async function doTLogin(e) {
+  e.preventDefault();
+  const h = await sha256('jukenko-teacher:' + $('#t-pw').value);
+  if (h !== C.TEACHER_PW_HASH) { $('#t-err').textContent = 'パスワードが違います。'; return; }
+  try { sessionStorage.setItem(TOK_KEY, h); } catch (ex) { }
+  STATE.view = 'teacher'; render();
+}
 function importPanelHTML() {
   const t = STATE.teacher;
   return `<section class="panel" style="margin-bottom:14px"><h3>提出データを読み込む</h3>
@@ -1112,7 +1153,7 @@ function tFiltered() {
 function teacherHTML() {
   const t = STATE.teacher;
   const classes = [...new Set(t.students.map(s => s.cls))].sort((a, b) => String(a).localeCompare(String(b), 'ja', { numeric: true }));
-  const tabs = [['list', '生徒一覧'], ['days', '日別の受験者'], ['ai', 'AI相談'], ['data', '大学データ']];
+  const tabs = [['list', '生徒一覧'], ['days', '日別の受験者'], ['ai', 'AI相談'], ['data', 'システム設定']];
   return headerHTML('<span><b>教員ページ</b></span>', `<button class="btn sm ghost" data-act="logout">終了</button>`) +
     `<div class="wrap"><nav class="tabs">${tabs.map(([k, l]) => `<button class="tab" aria-selected="${t.tab === k}" data-ttab="${k}">${l}</button>`).join('')}</nav>
     ${['list', 'days', 'ai'].includes(t.tab) ? importPanelHTML() : ''}
@@ -1176,7 +1217,7 @@ const AI_TEMPLATE = `あなたは高校の進路指導担当教員の補助を�
 ・偏差値帯は河合塾のボーダー帯の目安。合否を断定しない
 ・日程が「要確認」のものは断定せず、募集要項での確認を促す
 ・データにない大学・方式を提案するときは、その旨を明記する`;
-function loadAI() { let a = {}; try { a = JSON.parse(localStorage.getItem(AI_KEY)) || {}; } catch (e) { } return Object.assign({ template: AI_TEMPLATE, hideName: true }, a); }
+function loadAI() { let a = {}; try { a = JSON.parse(localStorage.getItem(AI_KEY)) || {}; } catch (e) { } return Object.assign({ template: AI_TEMPLATE, hideName: false }, a); }
 function saveAI(a) { try { localStorage.setItem(AI_KEY, JSON.stringify(a)); } catch (e) { } }
 function aiSettingsHTML() {
   const a = loadAI(); const list = tFiltered();
@@ -1192,7 +1233,7 @@ function aiSettingsHTML() {
     </section>
     <section class="panel"><h3>コピーする内容</h3>
       <p style="margin-top:0;font-size:14px">受験予定（試験日・大学学部学科・方式・偏差値帯・出願締切・発表・手続締切・位置づけ・結果・本人メモ）、共通テストの目標点と模試、英検・外部試験、第1志望・志望系統、本人の不安、日程の注意点。</p>
-      <label style="font-size:14px"><input type="checkbox" data-ai="hideName"${a.hideName ? ' checked' : ''}> 氏名と組・番号を入れない（おすすめ）</label>
+      <label style="font-size:14px"><input type="checkbox" data-ai="hideName"${a.hideName ? ' checked' : ''}> 氏名と組・番号を入れない</label>
     </section></div>`;
 }
 function studentBrief(s, hide) {
@@ -1230,11 +1271,41 @@ function tDaysHTML() {
       <div class="names">${by[d].sort((a, b) => String(a.s.cls).localeCompare(String(b.s.cls), 'ja', { numeric: true }) || a.s.no - b.s.no).map(e => `<div>${esc(clsL(e.s.cls))} ${esc(e.s.no)}番 ${esc(e.s.name)}：${esc(label(e.x))} ${esc(e.x.met)}</div>`).join('')}</div></details>`).join('') || '<div class="empty">まだ受験予定が登録されていません。</div>'}</div>`;
 }
 function tDataHTML() {
+  const tok = ghToken(); const sys = STATE.teacher.sys || {};
+  const settings = `<section class="panel"><h3>基本設定</h3>
+      <div class="field"><label for="cfg-school">学校名（画面とPDFに表示）</label><input id="cfg-school" class="inp" value="${esc(C.SCHOOL || '')}"></div>
+      <div class="field"><label for="cfg-classes">組の選択肢（カンマ区切り。空欄なら生徒が自由入力）</label><input id="cfg-classes" class="inp" value="${esc((C.CLASSES || []).join(','))}" placeholder="A,B,C,D,E,F,G,H"></div>
+      <div class="field"><label for="cfg-form">提出先：Microsoft Formsの事前入力リンク</label><textarea id="cfg-form" class="inp" rows="3" style="font-size:12px;word-break:break-all">${esc(C.FORM_URL || '')}</textarea></div>
+      <details style="font-size:13px;margin-bottom:10px"><summary style="cursor:pointer">Formsのリンクの作り方</summary>
+        <ol style="padding-left:1.3em;line-height:1.8;margin:6px 0">
+          <li>Formsで「組」「番号」「氏名」「提出コード」の4つの質問（テキスト）を作る。提出コードは「長い回答」をオン</li>
+          <li>設定で「すべてのユーザーが回答可能」にする</li>
+          <li>「…」→「事前入力済みリンクを取得」で、組に <b>CLASS</b>、番号に <b>NO</b>、氏名に <b>NAME</b>、提出コードに <b>CODE</b> と入れてリンクを作る</li>
+          <li>できたリンクを上の欄に貼る。年度が変わっても、回答を削除すれば同じフォームを使い続けられます</li>
+        </ol></details>
+      <div class="field"><label for="cfg-pw">教員パスワードを変える（変えないときは空欄）</label><input id="cfg-pw" class="inp" type="password" autocomplete="new-password"></div>
+      <div class="tools"><button class="btn primary" data-act="cfg-save"${tok ? '' : ' disabled'}>設定を保存して公開</button>${tok ? '' : '<span class="note">保存するには、先に「GitHubとの接続」を設定してください。</span>'}</div>
+      ${sys.cfgMsg ? `<p class="notice ${sys.cfgOk ? 'info' : ''}">${esc(sys.cfgMsg)}</p>` : ''}
+    </section>
+    <section class="panel"><h3>GitHubとの接続（はじめに1回）</h3>
+      <p style="margin-top:0;font-size:14px">設定と大学データをこの画面から公開するために、GitHubの「アクセストークン」をこのパソコンに登録します。トークンはこのブラウザにだけ保存され、ページには含まれません。</p>
+      <div class="tools"><input id="gh-token" class="inp" type="password" autocomplete="off" placeholder="${tok ? '登録済み（入れ直すと上書き）' : 'github_pat_…'}" style="flex:1 1 240px">
+        <button class="btn" data-act="gh-save">登録して接続を確認</button>${tok ? '<button class="btn ghost danger" data-act="gh-clear">登録を消す</button>' : ''}</div>
+      ${sys.ghMsg ? `<p class="notice ${sys.ghOk ? 'info' : ''}">${esc(sys.ghMsg)}</p>` : ''}
+      <details style="font-size:13px"><summary style="cursor:pointer">トークンの作り方</summary>
+        <ol style="padding-left:1.3em;line-height:1.8;margin:6px 0">
+          <li>GitHubにログインし、右上のアイコン →「Settings」→「Developer settings」→「Personal access tokens」→「Fine-grained tokens」→「Generate new token」</li>
+          <li>Resource owner：<b>${esc(C.GITHUB_REPO.split('/')[0])}</b>、Repository access：「Only select repositories」で <b>${esc(C.GITHUB_REPO.split('/')[1])}</b> を選ぶ</li>
+          <li>Permissions の「Contents」を <b>Read and write</b> にする</li>
+          <li>有効期限（最長1年）を決めて作成し、表示された文字列（github_pat_…）を上の欄に貼る。期限が切れたら作り直す</li>
+          <li>組織の設定でトークンの利用に承認が必要な場合は、組織の管理者が承認する</li>
+        </ol></details>
+    </section>`;
   const cnt = {}; M.rows.forEach(x => cnt[x.conf || '（空欄）'] = (cnt[x.conf || '（空欄）'] || 0) + 1);
   const kinds = {}; M.rows.forEach(x => kinds[x.kind] = (kinds[x.kind] || 0) + 1);
   const conv = STATE.teacher.conv; const chk = STATE.teacher.chk;
   const list = (arr, cls) => arr.length ? `<ul class="chk ${cls}">${arr.slice(0, 40).map(t => `<li>${esc(t)}</li>`).join('')}${arr.length > 40 ? `<li>…ほか${arr.length - 40}件</li>` : ''}</ul>` : '';
-  return `${STATE.preview ? '<div class="notice">いま、この端末だけチェックしたExcelの内容で表示しています（再読み込みすると元に戻ります）。</div>' : ''}
+  return `${settings.replace('<section', '<div class="pf">' + '<section') }</div><h2 style="font-size:18px;margin:22px 0 10px">大学データ</h2>${STATE.preview ? '<div class="notice">いま、この端末だけチェックしたExcelの内容で表示しています（再読み込みすると元に戻ります）。</div>' : ''}
   <div class="pf">
     <section class="panel"><h3>① 更新用Excelをダウンロード</h3>
       <p style="margin:0 0 6px;font-size:14px">いま公開している大学データ：${M.rows.length.toLocaleString()}行・${M.unis.length}大学（${esc(M.settings.year)}年度、データ更新日 ${esc(M.settings.updated || '—')}）</p>
@@ -1248,16 +1319,13 @@ function tDataHTML() {
       ${chk ? `<div class="chkres">
         <p class="${chk.errors.length ? 'bad' : 'ok'}"><b>${chk.errors.length ? `直す必要がある問題が${chk.errors.length}件あります` : 'このまま使えます'}</b>　${esc(chk.summary)}</p>
         ${list(chk.errors, 'bad')}${chk.warns.length ? `<p><b>確認したほうがよい点 ${chk.warns.length}件</b></p>${list(chk.warns, 'warn')}` : ''}
-        ${chk.errors.length ? '' : `<div class="tools"><button class="btn" data-act="chk-preview">この端末で試しに表示</button></div>`}
+        ${chk.errors.length ? '' : `<div class="tools"><button class="btn" data-act="chk-preview">この端末で試しに表示</button><button class="btn primary" data-act="chk-publish"${tok && !sys.busy ? '' : ' disabled'}>${sys.busy ? '公開しています…' : 'このExcelを公開する'}</button></div>${tok ? '' : '<p class="note">公開するには、「GitHubとの接続」を設定してください。</p>'}`}
+        ${sys.pubMsg ? `<p class="notice ${sys.pubOk ? 'info' : ''}">${esc(sys.pubMsg)}</p>` : ''}
       </div>` : ''}
     </section>
-    <section class="panel"><h3>③ GitHubに置いて公開</h3>
-      <ol style="margin:0;padding-left:1.3em;font-size:14px;line-height:1.9">
-        <li>GitHubで <b>nu1school/jukenko</b> を開き、<b>data</b> フォルダに入る</li>
-        <li>「Add file」→「Upload files」で、チェック済みのExcelをアップロード（ファイル名は <b>master.xlsx</b>）</li>
-        <li>「Commit changes」を押す。1〜2分で公開ページに反映されます</li>
-        <li>新年度なら、Microsoft Formsの回答を「すべての回答を削除」で空にする</li>
-      </ol>
+    <section class="panel"><h3>③ 公開</h3>
+      <p style="margin-top:0;font-size:14px">②でエラーがなければ「このExcelを公開する」を押すだけです。1〜2分で全員のページが新しいデータになります。新年度なら、Microsoft Formsの回答も「すべての回答を削除」で空にしてください。</p>
+      <p class="note">GitHubとの接続ができないときは、GitHubの data フォルダに master.xlsx をアップロードしても同じです。</p>
     </section>
     <section class="panel"><h3>（補助）Kei-Netの入試日一覧から行を作る</h3>
       <p style="margin-top:0;font-size:14px">Kei-Net「入試日一覧」のExcel（複数可）を選ぶと、この大学データの形式（1行＝1試験）に変換します。出願・発表・手続の日付は空欄になります。</p>
@@ -1316,8 +1384,9 @@ function validateWorkbook(wb) {
 }
 async function checkFile(f) {
   try {
-    const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });
-    STATE.teacher.chk = Object.assign(validateWorkbook(wb), { wb });
+    const buf = await f.arrayBuffer(); const wb = XLSX.read(buf, { type: 'array' });
+    STATE.teacher.chk = Object.assign(validateWorkbook(wb), { wb, buf });
+    if (STATE.teacher.sys) STATE.teacher.sys.pubMsg = '';
   } catch (e) { STATE.teacher.chk = { errors: ['Excelファイルとして読み込めませんでした（.xlsx か確認してください）'], warns: [], summary: '' }; }
   render();
 }
@@ -1396,6 +1465,7 @@ async function convertKeinet(files) {
 function afterRender() {
   renderSave();
   const lf = $('#loginForm'); if (lf) lf.addEventListener('submit', doLogin);
+  const tf = $('#tForm'); if (tf) tf.addEventListener('submit', doTLogin);
   $$('details.fac').forEach(d => d.addEventListener('toggle', () => {
     if (!d.open) return; const body = $('.fac-body', d); if (body.innerHTML) return;
     if (d.dataset.fac !== undefined) {
@@ -1439,8 +1509,9 @@ document.addEventListener('click', async e => {
   const act = d.act; if (!act) return;
   const pickEl = t.closest('.pick'); const pi = pickEl ? +pickEl.dataset.i : -1;
   switch (act) {
-    case 'tlogin': STATE.view = 'teacher'; render(); break;
-    case 'logout': if (STATE.me) storeMe(); STATE.me = null; STATE.view = 'login'; render(); window.scrollTo({ top: 0 }); break;
+    case 'tlogin': STATE.view = isTeacherOk() ? 'teacher' : 'tlogin'; render(); break;
+    case 'tback': STATE.view = 'login'; render(); break;
+    case 'logout': if (STATE.view === 'teacher') { try { sessionStorage.removeItem(TOK_KEY); } catch (ex) { } } if (STATE.me) storeMe(); STATE.me = null; STATE.view = 'login'; render(); window.scrollTo({ top: 0 }); break;
     case 'resume': { const me = loadMe(); if (me) startStudent(me, '続きから開きました'); break; }
     case 'restore': {
       const v = ($('#r-code') || {}).value || '';
@@ -1461,6 +1532,33 @@ document.addEventListener('click', async e => {
     case 'ai-copy': { const s = STATE.teacher.students.find(x => x.cls + '#' + x.no === d.key); if (!s) break; const ok = await copyText(studentBrief(s, loadAI().hideName)); toast(ok ? '生徒の情報をコピーしました。Claudeのチャットに貼り付けてください' : 'コピーできませんでした'); break; }
     case 'ai-copytpl': { const ok = await copyText(loadAI().template); toast(ok ? 'テンプレートをコピーしました' : 'コピーできませんでした'); break; }
     case 'ai-resettpl': { const a = loadAI(); a.template = AI_TEMPLATE; saveAI(a); render(); toast('最初の内容に戻しました'); break; }
+    case 'chk-publish': {
+      const chk = STATE.teacher.chk; const sys = STATE.teacher.sys = STATE.teacher.sys || {}; if (!chk || !chk.buf || chk.errors.length) break;
+      sys.busy = true; sys.pubMsg = ''; render();
+      try { await ghPutFile('data/master.xlsx', bufToB64(chk.buf), '大学データを更新'); sys.pubOk = true; sys.pubMsg = '公開しました。1〜2分で全員のページに反映されます。'; }
+      catch (ex) { sys.pubOk = false; sys.pubMsg = '公開できませんでした：' + ex.message; }
+      sys.busy = false; render(); break;
+    }
+    case 'cfg-save': {
+      const sys = STATE.teacher.sys = STATE.teacher.sys || {};
+      const cfg = { SCHOOL: $('#cfg-school').value.trim(), CLASSES: $('#cfg-classes').value.split(/[,、，\s]+/).map(x => x.trim()).filter(Boolean), FORM_URL: $('#cfg-form').value.trim(), TEACHER_PW_HASH: C.TEACHER_PW_HASH, updated: nowStr() };
+      const pw = $('#cfg-pw').value; if (pw) cfg.TEACHER_PW_HASH = await sha256('jukenko-teacher:' + pw);
+      if (cfg.FORM_URL && !/CODE/.test(cfg.FORM_URL)) { sys.cfgOk = false; sys.cfgMsg = 'FormsのリンクにCODEが入っていません。提出コードの欄に CODE と入れて事前入力リンクを作り直してください。'; render(); break; }
+      try {
+        await ghPutFile('data/config.json', btoa(unescape(encodeURIComponent(JSON.stringify(cfg, null, 2)))), 'システム設定を更新');
+        Object.assign(C, cfg); try { sessionStorage.setItem(TOK_KEY, C.TEACHER_PW_HASH); } catch (ex) { }
+        sys.cfgOk = true; sys.cfgMsg = '保存しました。1〜2分で全員のページに反映されます。' + (pw ? '教員パスワードも変更しました。' : '');
+      } catch (ex) { sys.cfgOk = false; sys.cfgMsg = '保存できませんでした：' + ex.message; }
+      render(); break;
+    }
+    case 'gh-save': {
+      const sys = STATE.teacher.sys = STATE.teacher.sys || {}; const v = $('#gh-token').value.trim();
+      if (v) { try { localStorage.setItem(GH_KEY, v); } catch (ex) { } }
+      try { const r = await ghFetch(''); sys.ghOk = !!(r.permissions && r.permissions.push); sys.ghMsg = sys.ghOk ? `${C.GITHUB_REPO} に接続できました。この画面から公開できます。` : '接続はできましたが、書き込みの権限がありません。トークンの「Contents」を Read and write にしてください。'; }
+      catch (ex) { sys.ghOk = false; sys.ghMsg = '接続できませんでした：' + ex.message; }
+      render(); break;
+    }
+    case 'gh-clear': { try { localStorage.removeItem(GH_KEY); } catch (ex) { } STATE.teacher.sys = {}; render(); toast('トークンの登録を消しました'); break; }
     case 'chk-preview': if (STATE.teacher.chk && STATE.teacher.chk.wb) { ingestWorkbook(STATE.teacher.chk.wb); STATE.preview = true; render(); toast('この端末だけ、チェックしたデータで表示しています'); } break;
     case 'imp-go': importTexts([($('#imp-text') || {}).value || '']); break;
     case 'imp-clear': try { sessionStorage.removeItem(T_KEY); } catch (ex) { } STATE.teacher.students = []; STATE.teacher.sel = new Set(); STATE.teacher.imp = ''; render(); break;
@@ -1534,6 +1632,7 @@ window.addEventListener('resize', () => { const n = isNarrow(); if (lastNarrow !
 (async function boot() {
   const app = $('#app');
   if (typeof XLSX === 'undefined') { app.innerHTML = `<div class="login"><h1>受験校プランナー</h1><p class="err-msg">表計算ライブラリを読み込めませんでした。インターネットに接続して再読み込みしてください。</p></div>`; return; }
+  await loadConfigFile();
   try { await loadMaster(); if (!restoreUI()) render(); }
   catch (e) {
     app.innerHTML = `<div class="login"><h1>受験校プランナー</h1><p class="err-msg">大学データ（${esc(C.MASTER_URL)}）を読み込めませんでした。</p>
