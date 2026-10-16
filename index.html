@@ -219,6 +219,11 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .aiout{white-space:pre-wrap;background:var(--sunken);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;margin-top:10px;font-size:14px;line-height:1.8}
 .aiout .aih{display:block;font-family:var(--f-head);font-size:15px;margin-top:6px;color:var(--ai)}
 
+.chk{margin:4px 0 8px;padding-left:1.2em;font-size:13px;line-height:1.7}
+.chk.bad li{color:var(--danger)} .chk.warn li{color:var(--warn)}
+.chkres p.bad{color:var(--danger)} .chkres p.ok{color:var(--ok)}
+a.btn{text-decoration:none;color:inherit} a.btn.primary{color:var(--ai-ink)}
+
 /* search */
 .filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
 .fchip{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 12px;cursor:pointer;font-size:13px}
@@ -507,7 +512,7 @@ async function copyText(text) {
 /* ============================================================
    状態
    ============================================================ */
-const STATE = { view: 'login', tab: 'plan', me: null, code: '', saveState: '', newConfirm: false, pdfCal: false,
+const STATE = { view: 'login', tab: 'plan', me: null, code: '', saveState: '', newConfirm: false, pdfCal: false, preview: false,
   search: { grp: '', q: '', uni: '', kinds: new Set(KINDS.filter(k => k !== '共テ利用')), fq: '' },
   cal: { grps: new Set(), q: '', day: '', focus: '', field: '', kinds: new Set(['一般', '共テ併用', '国公立']) }, planView: 'list',
   kyo: { grp: '', uni: '', fq: '' },
@@ -1125,7 +1130,7 @@ function tListHTML() {
     ${list.map(s => { const ps = (s.picks || []).filter(p => p.status !== '取りやめ'); const k = n => ps.filter(p => n.includes(exOf(p).kind)).length; const r = kyoTotals(s.profile); const key = s.cls + '#' + s.no;
       return `<tr><td><input type="checkbox" data-sel="${esc(key)}"${t.sel.has(key) ? ' checked' : ''} aria-label="選択"></td><td>${esc(s.cls)}</td><td class="num">${esc(s.no)}</td><td><b>${esc(s.name)}</b></td><td class="num">${ps.length}</td><td class="num">${k(['一般', '共テ併用'])}</td><td class="num">${k(['共テ利用'])}</td><td class="num">${k(['国公立'])}</td>
       <td>${esc((s.profile || {}).eiken || '')}${(s.profile || {}).cse ? ` <span class="num">${esc(s.profile.cse)}</span>` : ''}</td><td class="num">${r.mx ? `${r.tg}/${r.mx}` : ''}</td><td style="max-width:220px;overflow:hidden;text-overflow:ellipsis">${esc((s.profile || {}).hope1 || '')}</td><td class="num">${s.updated ? esc(String(s.updated).slice(5, 16).replace('T', ' ')) : ''}</td>
-      <td><button class="btn sm" data-detail="${esc(key)}">詳細</button> <button class="btn sm primary" data-act="ai-copy" data-key="${esc(key)}">AI相談文をコピー</button></td></tr>`; }).join('') || '<tr><td colspan="13">上の欄から提出データを読み込んでください。</td></tr>'}
+      <td><button class="btn sm" data-detail="${esc(key)}">詳細</button> <button class="btn sm primary" data-act="ai-copy" data-key="${esc(key)}">AI用にコピー</button></td></tr>`; }).join('') || '<tr><td colspan="13">上の欄から提出データを読み込んでください。</td></tr>'}
     </tbody></table></div>`;
 }
 function tDetailHTML(key) {
@@ -1139,60 +1144,62 @@ function tDetailHTML(key) {
     <div class="tbl-wrap"><table class="ex"><thead><tr><th>試験日</th><th>大学・学部・学科</th><th>方式</th><th>出願締切</th><th>発表</th><th>手続</th><th>位置づけ</th><th>結果</th><th>メモ</th></tr></thead><tbody>
     ${ps.map(p => { const x = exOf(p); const w = warningsFor(p, ps.filter(q => q.status !== '取りやめ')).filter(w => w.bad); return `<tr><td class="d">${x.kind === '共テ利用' ? '共テ利用' : fmt(x.date)}</td><td>${esc(label(x))}${w.length ? `<div class="w bad">${esc(w.map(z => z.t).join(' / '))}</div>` : ''}</td><td>${esc(x.met)}</td><td class="d">${fmt(x.close)}</td><td class="d">${fmt(x.ann)}</td><td class="d">${fmt(x.proc)}</td><td>${esc(p.pref || '—')}</td><td>${esc(p.status || '—')}</td><td>${esc(p.memo || '')}</td></tr>`; }).join('') || '<tr><td colspan="9">未登録</td></tr>'}
     </tbody></table></div>
-    ${aiPanelHTML(key, s)}</div></div>`;
+    <div class="tools" style="margin-top:14px"><button class="btn primary" data-act="ai-copy" data-key="${esc(key)}">生徒の情報をコピー（AI相談用）</button></div></div></div>`;
 }
 /* ============================================================
    AIアドバイス（教員ページのみ）
    ============================================================ */
 const AI_KEY = 'jukenko_planner_ai';
-const AI_MODELS = [['claude-sonnet-5-5', 'Claude Sonnet 5.5（標準）'], ['claude-opus-5-5', 'Claude Opus 5.5（じっくり）'], ['claude-haiku-5-5', 'Claude Haiku 5.5（速い・安い）']];
-const AI_DEFAULT_COMMON = '本校は私立高校。生徒の負担（連続受験は3日まで）にも配慮してください。第1志望への挑戦は尊重しつつ、合格を確保できる併願の組み方を具体的に示してください。';
-function loadAI() { let a = {}; try { a = JSON.parse(localStorage.getItem(AI_KEY)) || {}; } catch (e) { } return Object.assign({ key: '', model: AI_MODELS[0][0], common: AI_DEFAULT_COMMON, hideName: true }, a); }
+const AI_TEMPLATE = `あなたは高校の進路指導担当教員の補助をする、日本の大学受験の専門家です。
+これから「受験校プランナー」から書き出した生徒1人分の情報（受験予定・共通テストの目標点と模試・英検・第1志望・本人の不安）を貼り付けます。
+次の方針に沿って、担任が面談で使えるアドバイスを日本語で書いてください。
+
+【併願の組み方の基本方針】
+・実力相応校：3校程度
+・チャレンジ校：1校程度
+・すべり止め（安全校）：2校程度
+・試験日が3日以上連続しないようにする（連続は2日まで）。移動の負担も考える
+・第1志望の試験日の前日はなるべく空ける
+・すべり止めの入学手続締切が、チャレンジ校・実力相応校の合格発表より前に来る場合は指摘する（入学金の扱い）
+・共通テスト利用は、共テの目標点・模試の得点率と照らして出願するかを判断する
+・英検などのスコアが使える方式（英語外部試験利用型など）があれば提案する
+・出願締切が近いものから優先順位をつけて示す
+
+【回答の形式】
+## 全体の所見
+## 併願の組み方（足りない・多すぎる位置づけと、追加・削除の候補）
+## 日程上の注意
+## 共通テスト・英語資格の活かし方
+## 面談での声かけ案（2〜3文）
+
+【注意】
+・偏差値帯は河合塾のボーダー帯の目安。合否を断定しない
+・日程が「要確認」のものは断定せず、募集要項での確認を促す
+・データにない大学・方式を提案するときは、その旨を明記する`;
+function loadAI() { let a = {}; try { a = JSON.parse(localStorage.getItem(AI_KEY)) || {}; } catch (e) { } return Object.assign({ template: AI_TEMPLATE, hideName: true }, a); }
 function saveAI(a) { try { localStorage.setItem(AI_KEY, JSON.stringify(a)); } catch (e) { } }
 function aiSettingsHTML() {
   const a = loadAI(); const list = tFiltered();
   const rows = list.length ? `<div class="tbl-wrap" style="border:1px solid var(--line);border-radius:var(--r);margin-bottom:16px"><table class="ttable"><thead><tr><th>組</th><th>番号</th><th>氏名</th><th>受験校</th><th>第1志望</th><th>不安なこと</th><th></th></tr></thead><tbody>
     ${list.map(s => { const key = s.cls + '#' + s.no; const pf = s.profile || {}; return `<tr><td>${esc(clsL(s.cls))}</td><td class="num">${esc(s.no)}</td><td><b>${esc(s.name)}</b></td><td class="num">${(s.picks || []).length}</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">${esc(pf.hope1 || '')}</td><td style="max-width:240px;overflow:hidden;text-overflow:ellipsis">${esc(pf.memo || '')}</td>
-      <td><button class="btn sm primary" data-act="ai-copy" data-key="${esc(key)}">AI相談文をコピー</button> <button class="btn sm" data-detail="${esc(key)}">指示を足す</button></td></tr>`; }).join('')}</tbody></table></div>`
+      <td><button class="btn sm primary" data-act="ai-copy" data-key="${esc(key)}">生徒の情報をコピー</button></td></tr>`; }).join('')}</tbody></table></div>`
     : `<div class="empty" style="margin-bottom:16px">上の欄で提出データを読み込むと、ここに生徒が並びます。</div>`;
-  return `<div class="notice info" style="margin-top:0">「AI相談文をコピー」を押して、Claudeのチャットに貼り付けてください。受験校・共テ・英検・不安なことと、下の「共通の指示」が入ります。生徒ごとの指示を足したいときは「指示を足す」から。</div>${rows}<div class="pf">
-    <section class="panel"><h3>AIへの共通の指示</h3>
-      <p class="note" style="margin-top:0">全員の相談に毎回つける指示です。学校の方針や、先生として重視していることを書いてください。</p>
-      <textarea class="inp" rows="7" data-ai="common" id="ai-common">${esc(a.common)}</textarea>
-      <label style="font-size:13px;display:block;margin-top:8px"><input type="checkbox" data-ai="hideName"${a.hideName ? ' checked' : ''}> 氏名と組・番号をAIに送らない（おすすめ）</label>
+  return `<div class="notice info" style="margin-top:0">「生徒の情報をコピー」で、その生徒の受験校・共テ・英検・第1志望・不安なことがコピーされます。Claudeのチャットに貼り付けてください。</div>${rows}
+    <div class="pf"><section class="panel"><h3>共通の指示のテンプレート</h3>
+      <p class="note" style="margin-top:0">学校の方針に合わせて書き換えて使ってください。書き換えた内容はこのブラウザに残ります。Claudeで「プロジェクト」を作り、この指示をプロジェクトの指示欄に貼っておくと、あとは生徒の情報を貼るだけで済みます。</p>
+      <textarea class="inp" rows="16" id="ai-template" style="font-size:13px">${esc(a.template)}</textarea>
+      <div class="tools" style="margin-top:8px"><button class="btn primary" data-act="ai-copytpl">テンプレートをコピー</button><button class="btn ghost" data-act="ai-resettpl">最初の内容に戻す</button></div>
     </section>
-    <section class="panel"><h3>使い方は2通り</h3>
-      <p style="margin:0 0 6px;font-size:14px"><b>A. 相談文をコピーしてClaudeに貼る</b>（設定不要・追加料金なし）<br>生徒の詳細画面で「相談文をコピー」を押し、いつも使っているClaudeのチャットに貼り付けます。</p>
-      <p style="margin:0;font-size:14px"><b>B. このページの中でAIに答えてもらう</b>（APIキーが必要・従量課金）<br>Claude Console（platform.claude.com）でAPIキーを作り、下に入れます。1人分の相談は数円程度です。</p>
-    </section>
-    <section class="panel"><h3>APIキー（Bを使う場合）</h3>
-      <p class="note" style="margin-top:0">キーはこのパソコンのこのブラウザにだけ保存され、GitHubのページには含まれません。共用のパソコンでは使わないでください。</p>
-      <div class="tools"><input class="inp" type="password" id="ai-key" data-ai="key" placeholder="${a.key ? '保存済み（入れ直すと上書き）' : 'sk-ant-…'}" style="flex:1 1 240px" autocomplete="off">
-      ${a.key ? '<button class="btn ghost danger" data-act="ai-clearkey">キーを消す</button>' : ''}</div>
-      <div class="field"><label for="ai-model">モデル</label><select id="ai-model" class="inp" data-ai="model">${AI_MODELS.map(([v, l]) => `<option value="${v}"${a.model === v ? ' selected' : ''}>${l}</option>`).join('')}</select></div>
+    <section class="panel"><h3>コピーする内容</h3>
+      <p style="margin-top:0;font-size:14px">受験予定（試験日・大学学部学科・方式・偏差値帯・出願締切・発表・手続締切・位置づけ・結果・本人メモ）、共通テストの目標点と模試、英検・外部試験、第1志望・志望系統、本人の不安、日程の注意点。</p>
+      <label style="font-size:14px"><input type="checkbox" data-ai="hideName"${a.hideName ? ' checked' : ''}> 氏名と組・番号を入れない（おすすめ）</label>
     </section></div>`;
-}
-function aiState(key) { const t = STATE.teacher; t.ai = t.ai || {}; return t.ai[key] = t.ai[key] || { instr: '', out: '', busy: false, err: '' }; }
-function aiPanelHTML(key, s) {
-  const st = aiState(key); const a = loadAI();
-  return `<section class="panel" style="margin-top:14px"><h3>AIに受験の相談をする</h3><p class="note" style="margin-top:0">相談文に入る内容：受験予定（日程・方式・偏差値帯・志望度）、共テの目標点と模試、英検・外部試験、第1志望、本人の不安、家庭との相談事項、日程の注意点、先生の指示。</p>
-    <div class="field"><label for="ai-instr">この生徒についての指示（任意）</label>
-      <textarea id="ai-instr" class="inp" rows="3" data-aikey="${esc(key)}" placeholder="例：本人は理科大が第1志望だが、模試はB判定止まり。保護者は浪人不可の方針。安全校を2校入れたい。">${esc(st.instr)}</textarea></div>
-    <div class="tools"><button class="btn primary" data-act="ai-copy" data-key="${esc(key)}">AI相談文をコピー</button>
-      ${a.key ? `<button class="btn" data-act="ai-run" data-key="${esc(key)}"${st.busy ? ' disabled' : ''}>${st.busy ? '考えています…' : 'このページでAIに相談（API）'}</button>` : ''}
-      <span class="note">コピーした文をClaudeのチャットに貼ると、受験校・共テ・英検・不安なことをふまえたアドバイスが返ってきます。</span></div>
-    ${st.err ? `<div class="notice">${esc(st.err)}</div>` : ''}
-    ${st.out ? `<div class="aiout">${aiFormat(st.out)}</div><div class="tools" style="margin-top:8px"><button class="btn sm" data-act="ai-copyout" data-key="${esc(key)}">回答をコピー</button><span class="note">AIの回答は参考意見です。日程や入試制度は募集要項で確認してください。</span></div>` : ''}
-  </section>`;
-}
-function aiFormat(t) {
-  return esc(t).replace(/^#{1,3} ?(.+)\n?/gm, '<b class="aih">$1</b>').replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
 }
 function studentBrief(s, hide) {
   const pf = s.profile || {}; const r = kyoTotals(pf);
   const ps = (s.picks || []).filter(p => p.status !== '取りやめ');
   const L = [];
-  L.push(`今日の日付：${today}（${M.settings.year}年度入試）`);
+  L.push(`【生徒の情報】（${today} 時点・${M.settings.year}年度入試）`);
   L.push(hide ? '生徒：（匿名）' : `生徒：${clsL(s.cls)} ${s.no}番 ${s.name}`);
   L.push(`英検：${pf.eiken || '未入力'}${pf.cse ? `（CSE ${pf.cse}）` : ''}${pf.eikenPlan ? `／今後の受験予定：${pf.eikenPlan}` : ''}`);
   const ext = (pf.ext || []).filter(e => e && e.type); if (ext.length) L.push(`その他の英語試験：${ext.map(e => `${e.type} ${e.score || ''}`).join('、')}`);
@@ -1208,40 +1215,9 @@ function studentBrief(s, hide) {
   });
   if (!ps.length) L.push('（まだ登録なし）');
   const warns = [...new Set(ps.flatMap(p => warningsFor(p, ps).map(w => w.t)))];
-  if (warns.length) L.push('', 'システムが検出した注意点：', ...warns.map(w => '- ' + w));
+  if (warns.length) L.push('', '日程の注意点（システムが検出）：', ...warns.map(w => '- ' + w));
   return L.join('\n');
 }
-const AI_SYSTEM = `あなたは日本の高校で進路指導を担当する教員の補助をする、大学受験の専門家です。
-生徒の受験予定・共通テストの目標点・英語資格・本人の不安をもとに、担任が面談で使えるアドバイスを日本語で書いてください。
-次の見出しで、簡潔に具体的に書くこと。
-## 全体の所見
-## 併願の組み方（挑戦校・実力相応校・安全校のバランス、足りない・多すぎる点）
-## 日程上の注意（重複・連続受験・出願締切・入学手続締切と他校の発表の前後関係）
-## 共通テスト・英語資格の活かし方（共テ利用・英語外部試験利用方式など）
-## 本人の不安への声かけ案（面談でそのまま使える言い方を2〜3文）
-注意：偏差値帯は河合塾のボーダー帯で、合否を断定しないこと。日程は「要確認」の項目を断定しないこと。データにない大学の入試制度を推測で書くときは、そうと分かるように書くこと。`;
-function aiPrompt(s, instr) {
-  const a = loadAI();
-  return `${a.common ? `【先生からの共通の指示】\n${a.common}\n\n` : ''}${instr ? `【この生徒についての指示】\n${instr}\n\n` : ''}【生徒の情報】\n${studentBrief(s, a.hideName)}`;
-}
-async function aiRun(key) {
-  const s = STATE.teacher.students.find(x => x.cls + '#' + x.no === key); if (!s) return;
-  const a = loadAI(); const st = aiState(key);
-  if (!a.key) { st.err = 'APIキーが設定されていません。「AIアドバイス設定」タブで入れるか、「相談文をコピー」を使ってください。'; render(); return; }
-  st.busy = true; st.err = ''; render();
-  try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-api-key': a.key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-      body: JSON.stringify({ model: a.model, max_tokens: 2500, system: AI_SYSTEM, messages: [{ role: 'user', content: aiPrompt(s, st.instr) }] })
-    });
-    const j = await res.json();
-    if (!res.ok) throw new Error(res.status === 401 ? 'APIキーが正しくありません。' : res.status === 429 ? '利用上限に達しました。少し待ってから試してください。' : (j.error && j.error.message) || ('エラー ' + res.status));
-    st.out = (j.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n');
-  } catch (e) { st.err = 'AIに相談できませんでした：' + e.message; }
-  st.busy = false; render();
-}
-
 function tDaysHTML() {
   const by = {};
   for (const s of tFiltered()) for (const p of (s.picks || [])) {
@@ -1256,23 +1232,94 @@ function tDaysHTML() {
 function tDataHTML() {
   const cnt = {}; M.rows.forEach(x => cnt[x.conf || '（空欄）'] = (cnt[x.conf || '（空欄）'] || 0) + 1);
   const kinds = {}; M.rows.forEach(x => kinds[x.kind] = (kinds[x.kind] || 0) + 1);
-  const conv = STATE.teacher.conv;
-  return `<div class="pf">
-    <section class="panel"><h3>いま読み込んでいる大学データ</h3>
-      <p style="margin:0 0 6px">${esc(C.MASTER_URL)}：${M.rows.length.toLocaleString()}行・${M.unis.length}大学（データ更新日 ${esc(M.settings.updated || '—')}）</p>
-      <p class="note" style="margin:0">種別：${Object.entries(kinds).map(([k, v]) => `${esc(k)} ${v}`).join('／')}</p>
-      <p class="note">確度：${Object.entries(cnt).map(([k, v]) => `${esc(k)} ${v}`).join('／')}</p>
-      <button class="btn" data-act="dl-master">このデータをExcelで保存</button>
-      <p class="note">日程を直すときは、このExcelの「入試日程」シートを編集して、GitHubの data/master.xlsx を差し替えます。生徒の登録は ID で結びついているので、既存行の ID は変えないでください。</p>
+  const conv = STATE.teacher.conv; const chk = STATE.teacher.chk;
+  const list = (arr, cls) => arr.length ? `<ul class="chk ${cls}">${arr.slice(0, 40).map(t => `<li>${esc(t)}</li>`).join('')}${arr.length > 40 ? `<li>…ほか${arr.length - 40}件</li>` : ''}</ul>` : '';
+  return `${STATE.preview ? '<div class="notice">いま、この端末だけチェックしたExcelの内容で表示しています（再読み込みすると元に戻ります）。</div>' : ''}
+  <div class="pf">
+    <section class="panel"><h3>① 更新用Excelをダウンロード</h3>
+      <p style="margin:0 0 6px;font-size:14px">いま公開している大学データ：${M.rows.length.toLocaleString()}行・${M.unis.length}大学（${esc(M.settings.year)}年度、データ更新日 ${esc(M.settings.updated || '—')}）</p>
+      <p class="note" style="margin:0">確度：${Object.entries(cnt).map(([k, v]) => `${esc(k)} ${v}`).join('／')}</p>
+      <div class="tools" style="margin-top:10px"><a class="btn primary" href="${esc(C.MASTER_URL)}" download="master.xlsx">更新用Excelをダウンロード</a></div>
+      <p class="note">このExcelには「使い方」「記入ルール」「AIへの依頼文」のシートが入っています。ClaudeやChatGPTなどの外部AIに、依頼文と一緒に渡して更新してもらえます。手で直す場合も同じファイルを使います。</p>
     </section>
-    <section class="panel"><h3>次年度：Kei-Netの入試日一覧から作る</h3>
-      <p style="margin-top:0;font-size:14px">Kei-Net「入試日一覧」でダウンロードしたExcel（複数可）を選ぶと、この大学データの形式（1行＝1試験）に変換します。出願締切・合格発表・手続締切は空欄になるので、Excelで入力してください。</p>
+    <section class="panel"><h3>② 更新したExcelをチェック</h3>
+      <p style="margin-top:0;font-size:14px">AIや人が更新したExcelを選ぶと、列や日付の書き方が正しいかを確かめます。公開中のデータは変わりません。</p>
+      <input type="file" id="chk-file" accept=".xlsx" class="inp">
+      ${chk ? `<div class="chkres">
+        <p class="${chk.errors.length ? 'bad' : 'ok'}"><b>${chk.errors.length ? `直す必要がある問題が${chk.errors.length}件あります` : 'このまま使えます'}</b>　${esc(chk.summary)}</p>
+        ${list(chk.errors, 'bad')}${chk.warns.length ? `<p><b>確認したほうがよい点 ${chk.warns.length}件</b></p>${list(chk.warns, 'warn')}` : ''}
+        ${chk.errors.length ? '' : `<div class="tools"><button class="btn" data-act="chk-preview">この端末で試しに表示</button></div>`}
+      </div>` : ''}
+    </section>
+    <section class="panel"><h3>③ GitHubに置いて公開</h3>
+      <ol style="margin:0;padding-left:1.3em;font-size:14px;line-height:1.9">
+        <li>GitHubで <b>nu1school/jukenko</b> を開き、<b>data</b> フォルダに入る</li>
+        <li>「Add file」→「Upload files」で、チェック済みのExcelをアップロード（ファイル名は <b>master.xlsx</b>）</li>
+        <li>「Commit changes」を押す。1〜2分で公開ページに反映されます</li>
+        <li>新年度なら、Microsoft Formsの回答を「すべての回答を削除」で空にする</li>
+      </ol>
+    </section>
+    <section class="panel"><h3>（補助）Kei-Netの入試日一覧から行を作る</h3>
+      <p style="margin-top:0;font-size:14px">Kei-Net「入試日一覧」のExcel（複数可）を選ぶと、この大学データの形式（1行＝1試験）に変換します。出願・発表・手続の日付は空欄になります。</p>
       <input type="file" id="kn-files" accept=".xlsx,.xls" multiple class="inp">
       ${conv ? `<p class="notice info">${conv.files}ファイルから ${conv.rows.length}行（${conv.unis}大学）を読み取りました。${conv.skipped ? `読み取れなかったセル ${conv.skipped}件。` : ''}</p>
         <button class="btn primary" data-act="dl-conv">変換結果をExcelで保存</button>` : ''}
-      <p class="note">共テ利用・国公立の行は Kei-Net の「科目・配点」データなどから追加してください。</p>
     </section>
   </div>`;
+}
+const MASTER_COLS = ['ID', '区分', '大学', '学部', '学科', '方式', '種別', '試験日', '出願開始', '出願締切', '合格発表', '手続締切', '偏差値帯', '備考', '確度', '出典'];
+function validateWorkbook(wb) {
+  const errors = [], warns = [];
+  const sh = wb.Sheets['入試日程'];
+  if (!sh) return { errors: ['「入試日程」シートがありません。シート名を変えていないか確認してください。'], warns, summary: '' };
+  const aoa = XLSX.utils.sheet_to_json(sh, { header: 1, raw: true, defval: '' });
+  const head = (aoa[0] || []).map(h => String(h).trim());
+  MASTER_COLS.forEach(c => { if (!head.includes(c)) errors.push(`「入試日程」シートに「${c}」列がありません`); });
+  if (errors.length) return { errors, warns, summary: '' };
+  const col = c => head.indexOf(c);
+  const st = {}; const ssh = wb.Sheets['設定'];
+  if (!ssh) errors.push('「設定」シートがありません');
+  else XLSX.utils.sheet_to_json(ssh, { defval: '', raw: true }).forEach(r => st[String(r['項目'])] = r['値']);
+  const year = parseInt(st['年度'], 10);
+  if (ssh && !year) errors.push('「設定」シートの「年度」が入っていません');
+  if (ssh && !normDate(st['共通テスト1日目'])) warns.push('「設定」シートの「共通テスト1日目」が日付になっていません');
+  const groups = new Set(); const ush = wb.Sheets['大学'];
+  if (ush) XLSX.utils.sheet_to_json(ush, { defval: '' }).forEach(r => groups.add(String(r['区分'] || '').trim()));
+  const ids = new Map(); const unis = new Set(); const conf = {}; let n = 0;
+  const dateCols = ['試験日', '出願開始', '出願締切', '合格発表', '手続締切'];
+  aoa.slice(1).forEach((r, i) => {
+    const row = i + 2; const g = c => r[col(c)];
+    const uni = String(g('大学') || '').trim();
+    if (!uni && !r.some(v => String(v).trim())) return;
+    n++;
+    const where = `${row}行目（${uni || '大学名なし'} ${g('学部') || ''} ${g('方式') || ''}）`;
+    if (!uni) { errors.push(`${row}行目：大学名が空欄です`); return; }
+    unis.add(uni);
+    const kind = String(g('種別') || '').trim();
+    if (!KINDS.includes(kind)) errors.push(`${where}：種別「${kind}」は使えません（一般／共テ併用／共テ利用／国公立）`);
+    const d = {};
+    for (const c of dateCols) { const v = g(c); if (v === '' || v == null) { d[c] = ''; continue; } d[c] = normDate(v); if (!d[c]) errors.push(`${where}：${c}「${v}」が日付として読めません（yyyy-mm-dd で書く）`); }
+    if (kind && kind !== '共テ利用' && (g('試験日') === '' || g('試験日') == null)) errors.push(`${where}：試験日が空欄です（共テ利用以外は必須）`);
+    if (d['試験日'] && year && ![year, year - 1].includes(+d['試験日'].slice(0, 4))) warns.push(`${where}：試験日 ${d['試験日']} が ${year}年度入試の期間外です`);
+    if (d['出願締切'] && d['試験日'] && d['出願締切'] > d['試験日']) errors.push(`${where}：出願締切（${d['出願締切']}）が試験日より後です`);
+    if (d['出願開始'] && d['出願締切'] && d['出願開始'] > d['出願締切']) errors.push(`${where}：出願開始が出願締切より後です`);
+    if (d['合格発表'] && d['試験日'] && d['合格発表'] < d['試験日']) warns.push(`${where}：合格発表が試験日より前です`);
+    if (d['手続締切'] && d['合格発表'] && d['手続締切'] < d['合格発表']) warns.push(`${where}：手続締切が合格発表より前です`);
+    const grp = String(g('区分') || '').trim(); if (groups.size && grp && !groups.has(grp)) warns.push(`${where}：区分「${grp}」が「大学」シートにありません`);
+    const id = String(g('ID') || '').trim();
+    if (id) { if (ids.has(id)) errors.push(`${where}：ID「${id}」が${ids.get(id)}行目と重複しています`); else ids.set(id, row); }
+    const cf = String(g('確度') || '（空欄）').trim(); conf[cf] = (conf[cf] || 0) + 1;
+  });
+  if (!n) errors.push('「入試日程」シートにデータがありません');
+  const summary = `${year || '?'}年度・${n.toLocaleString()}行・${unis.size}大学。確度：${Object.entries(conf).map(([k, v]) => `${k} ${v}`).join('／')}`;
+  return { errors, warns, summary };
+}
+async function checkFile(f) {
+  try {
+    const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });
+    STATE.teacher.chk = Object.assign(validateWorkbook(wb), { wb });
+  } catch (e) { STATE.teacher.chk = { errors: ['Excelファイルとして読み込めませんでした（.xlsx か確認してください）'], warns: [], summary: '' }; }
+  render();
 }
 function picksCSVRows(list) {
   const out = [['組', '番号', '氏名', '区分', '大学', '学部', '学科', '方式', '種別', '試験日', '出願開始', '出願締切', '合格発表', '手続締切', '位置づけ', '結果', 'メモ', '偏差値帯', '確度', 'ID']];
@@ -1411,10 +1458,10 @@ document.addEventListener('click', async e => {
       break;
     }
     case 'copycode': { STATE.code = await encodeCode(STATE.me); const ok = await copyText(STATE.code); toast(ok ? '復元コードをコピーしました' : 'コードを選んでコピーしてください'); break; }
-    case 'ai-run': aiRun(d.key); break;
-    case 'ai-copy': { const s = STATE.teacher.students.find(x => x.cls + '#' + x.no === d.key); if (!s) break; const txt = AI_SYSTEM + '\n\n' + aiPrompt(s, aiState(d.key).instr); const ok = await copyText(txt); toast(ok ? '相談文をコピーしました。Claudeのチャットに貼り付けてください' : 'コピーできませんでした'); break; }
-    case 'ai-copyout': { const ok = await copyText(aiState(d.key).out); toast(ok ? '回答をコピーしました' : 'コピーできませんでした'); break; }
-    case 'ai-clearkey': { const a = loadAI(); a.key = ''; saveAI(a); render(); toast('APIキーを消しました'); break; }
+    case 'ai-copy': { const s = STATE.teacher.students.find(x => x.cls + '#' + x.no === d.key); if (!s) break; const ok = await copyText(studentBrief(s, loadAI().hideName)); toast(ok ? '生徒の情報をコピーしました。Claudeのチャットに貼り付けてください' : 'コピーできませんでした'); break; }
+    case 'ai-copytpl': { const ok = await copyText(loadAI().template); toast(ok ? 'テンプレートをコピーしました' : 'コピーできませんでした'); break; }
+    case 'ai-resettpl': { const a = loadAI(); a.template = AI_TEMPLATE; saveAI(a); render(); toast('最初の内容に戻しました'); break; }
+    case 'chk-preview': if (STATE.teacher.chk && STATE.teacher.chk.wb) { ingestWorkbook(STATE.teacher.chk.wb); STATE.preview = true; render(); toast('この端末だけ、チェックしたデータで表示しています'); } break;
     case 'imp-go': importTexts([($('#imp-text') || {}).value || '']); break;
     case 'imp-clear': try { sessionStorage.removeItem(T_KEY); } catch (ex) { } STATE.teacher.students = []; STATE.teacher.sel = new Set(); STATE.teacher.imp = ''; render(); break;
     case 'del': if (pi >= 0) { STATE.me.picks.splice(pi, 1); touch(); rerenderTab(); refreshCounts(); } break;
@@ -1448,8 +1495,7 @@ function onInput(t, composing) {
   if (t.id === 'k-fq') { STATE.kyo.fq = t.value; clearTimeout(t._tm); t._tm = setTimeout(() => keepFocus('k-fq', rerenderTab), 250); return; }
   if (t.id === 'c-q') { STATE.cal.q = t.value; clearTimeout(t._tm); t._tm = setTimeout(() => keepFocus('c-q', rerenderTab), 250); return; }
   if (t.id === 't-q') { STATE.teacher.q = t.value; keepFocus('t-q', render); return; }
-  if (d.aikey) { aiState(d.aikey).instr = t.value; return; }
-  if (t.id === 'ai-common') { const a = loadAI(); a.common = t.value; saveAI(a); return; }
+  if (t.id === 'ai-template') { const a = loadAI(); a.template = t.value; saveAI(a); return; }
   if (!STATE.me) return;
   const pf = STATE.me.profile;
   if (d.p) { pf[d.p] = t.type === 'checkbox' ? t.checked : t.value; touch(); return; }
@@ -1465,7 +1511,8 @@ document.addEventListener('change', e => {
   const t = e.target; const d = t.dataset;
   if (t.id === 't-cls') { STATE.teacher.cls = t.value; render(); return; }
   if (t.id === 'pdf-withcal' || t.id === 't-withcal') { STATE.pdfCal = t.checked; return; }
-  if (t.dataset.ai) { const a = loadAI(); a[t.dataset.ai] = t.type === 'checkbox' ? t.checked : t.value; saveAI(a); if (t.dataset.ai === 'key') { t.value = ''; render(); toast(a.key ? 'APIキーをこの端末に保存しました' : 'APIキーを消しました'); } return; }
+  if (t.dataset.ai) { const a = loadAI(); a[t.dataset.ai] = t.type === 'checkbox' ? t.checked : t.value; saveAI(a); return; }
+  if (t.id === 'chk-file' && t.files.length) { checkFile(t.files[0]); return; }
   if (t.id === 'kn-files' && t.files.length) { convertKeinet([...t.files]); return; }
   if (t.id === 'imp-files' && t.files.length) { importFiles([...t.files]); return; }
   if (!STATE.me) return;

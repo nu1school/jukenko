@@ -16,7 +16,7 @@ def D(s):
     y = YEAR - 1 if int(m) >= 10 else YEAR
     return f'{y}-{int(m):02d}-{int(d):02d}'
 
-def R(o, c, a, p, note='', conf='2027確定', src=''):
+def R(o, c, a, p, note='', conf='確定', src=''):
     return dict(open=D(o), close=D(c), ann=D(a), proc=D(p), note=note, conf=conf, src=src)
 
 KEINET = 'Kei-Net 大学からのお知らせ'
@@ -149,7 +149,7 @@ def general(u, f, g, m, d):
         return R('1/4', '1/21', '2/15', '2/19', note='手続は第1次（入学金）。第2次は3/8まで', src=KEINET)
     if u == '武蔵':
         a = '2/10' if x == '2/2' else '2/15'
-        return R('1/5', '1/25', a, '2/26', note='手続は1次。2次は3/12', conf='2027（発表日は方式から推定）', src=KEINET)
+        return R('1/5', '1/25', a, '2/26', note='手続は1次。2次は3/12', conf='要確認', src=KEINET)
     if u == '日本':
         return nichidai(f, g, m, x)
     if u == '東洋':
@@ -378,7 +378,7 @@ def kyotest(u, f, g, m):
     if u == '明治':
         if '後期' in m:
             return R('2/22', '3/1', '', '3/25', note='合格発表は3/12〜3/14（学部により異なる）', src=KEINET)
-        return R('1/7', '1/15', '', '', note='合格発表2/12〜2/17、手続締切2/18〜3/11（学部・方式により異なる）', conf='2027（発表日は要確認）', src=KEINET)
+        return R('1/7', '1/15', '', '', note='合格発表2/12〜2/17、手続締切2/18〜3/11（学部・方式により異なる）', conf='要確認', src=KEINET)
     if u == '青山学院':
         return R('1/6', '1/15', '2/18', '2/25', note='書類は1/19必着', src=KEINET)
     if u == '立教':
