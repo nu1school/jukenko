@@ -1305,35 +1305,35 @@ function tDataHTML() {
   const kinds = {}; M.rows.forEach(x => kinds[x.kind] = (kinds[x.kind] || 0) + 1);
   const conv = STATE.teacher.conv; const chk = STATE.teacher.chk;
   const list = (arr, cls) => arr.length ? `<ul class="chk ${cls}">${arr.slice(0, 40).map(t => `<li>${esc(t)}</li>`).join('')}${arr.length > 40 ? `<li>…ほか${arr.length - 40}件</li>` : ''}</ul>` : '';
-  return `${settings.replace('<section', '<div class="pf">' + '<section') }</div><h2 style="font-size:18px;margin:22px 0 10px">大学データ</h2>${STATE.preview ? '<div class="notice">いま、この端末だけチェックしたExcelの内容で表示しています（再読み込みすると元に戻ります）。</div>' : ''}
+  const ready = chk && !chk.errors.length && chk.buf;
+  return `${settings.replace('<section', '<div class="pf">' + '<section')}</div>
+  <h2 style="font-size:18px;margin:22px 0 10px">大学データ（入試日程）</h2>
   <div class="pf">
     <section class="panel"><h3>① 更新用Excelをダウンロード</h3>
-      <p style="margin:0 0 6px;font-size:14px">いま公開している大学データ：${M.rows.length.toLocaleString()}行・${M.unis.length}大学（${esc(M.settings.year)}年度、データ更新日 ${esc(M.settings.updated || '—')}）</p>
-      <p class="note" style="margin:0">確度：${Object.entries(cnt).map(([k, v]) => `${esc(k)} ${v}`).join('／')}</p>
+      <p style="margin:0 0 6px;font-size:14px">いまの入試日程：${esc(M.settings.year)}年度・${M.unis.length}大学・${M.rows.length.toLocaleString()}行（${esc(M.settings.updated || '—')} 更新）</p>
       <div class="tools" style="margin-top:10px"><a class="btn primary" href="${esc(C.MASTER_URL)}" download="master.xlsx">更新用Excelをダウンロード</a></div>
-      <p class="note">このExcelには「使い方」「記入ルール」「AIへの依頼文」のシートが入っています。ClaudeやChatGPTなどの外部AIに、依頼文と一緒に渡して更新してもらえます。手で直す場合も同じファイルを使います。</p>
+      <p class="note">Excelの中の「AIへの依頼文」と一緒にAI（ClaudeやChatGPTなど）に渡すと、新しい年度の日程に更新してもらえます。手で直してもかまいません。</p>
     </section>
-    <section class="panel"><h3>② 更新したExcelをチェック</h3>
-      <p style="margin-top:0;font-size:14px">AIや人が更新したExcelを選ぶと、列や日付の書き方が正しいかを確かめます。公開中のデータは変わりません。</p>
+    <section class="panel"><h3>② 更新したExcelをアップロード</h3>
       <input type="file" id="chk-file" accept=".xlsx" class="inp">
       ${chk ? `<div class="chkres">
-        <p class="${chk.errors.length ? 'bad' : 'ok'}"><b>${chk.errors.length ? `直す必要がある問題が${chk.errors.length}件あります` : 'このまま使えます'}</b>　${esc(chk.summary)}</p>
-        ${list(chk.errors, 'bad')}${chk.warns.length ? `<p><b>確認したほうがよい点 ${chk.warns.length}件</b></p>${list(chk.warns, 'warn')}` : ''}
-        ${chk.errors.length ? '' : `<div class="tools"><button class="btn" data-act="chk-preview">この端末で試しに表示</button><button class="btn primary" data-act="chk-publish"${tok && !sys.busy ? '' : ' disabled'}>${sys.busy ? '公開しています…' : 'このExcelを公開する'}</button></div>${tok ? '' : '<p class="note">公開するには、「GitHubとの接続」を設定してください。</p>'}`}
-        ${sys.pubMsg ? `<p class="notice ${sys.pubOk ? 'info' : ''}">${esc(sys.pubMsg)}</p>` : ''}
-      </div>` : ''}
+        <p class="${chk.errors.length ? 'bad' : 'ok'}"><b>${chk.errors.length ? `直す必要がある箇所が${chk.errors.length}件あります` : '問題ありません。③で公開できます'}</b><br><span style="font-size:13px">${esc(chk.summary)}</span></p>
+        ${list(chk.errors, 'bad')}${chk.warns.length ? `<details><summary style="cursor:pointer;font-size:13px">念のため確認したい点 ${chk.warns.length}件</summary>${list(chk.warns, 'warn')}</details>` : ''}
+      </div>` : '<p class="note">アップロードすると、書き方に問題がないかを自動で確認します。まだ公開はされません。</p>'}
     </section>
-    <section class="panel"><h3>③ 公開</h3>
-      <p style="margin-top:0;font-size:14px">②でエラーがなければ「このExcelを公開する」を押すだけです。1〜2分で全員のページが新しいデータになります。新年度なら、Microsoft Formsの回答も「すべての回答を削除」で空にしてください。</p>
-      <p class="note">GitHubとの接続ができないときは、GitHubの data フォルダに master.xlsx をアップロードしても同じです。</p>
-    </section>
-    <section class="panel"><h3>（補助）Kei-Netの入試日一覧から行を作る</h3>
-      <p style="margin-top:0;font-size:14px">Kei-Net「入試日一覧」のExcel（複数可）を選ぶと、この大学データの形式（1行＝1試験）に変換します。出願・発表・手続の日付は空欄になります。</p>
-      <input type="file" id="kn-files" accept=".xlsx,.xls" multiple class="inp">
-      ${conv ? `<p class="notice info">${conv.files}ファイルから ${conv.rows.length}行（${conv.unis}大学）を読み取りました。${conv.skipped ? `読み取れなかったセル ${conv.skipped}件。` : ''}</p>
-        <button class="btn primary" data-act="dl-conv">変換結果をExcelで保存</button>` : ''}
-    </section>
-  </div>`;
+  </div>
+  <section class="panel" style="margin-top:16px"><h3>③ 公開</h3>
+    <div class="tools"><button class="btn primary" data-act="chk-publish"${ready && tok && !sys.busy ? '' : ' disabled'}>${sys.busy ? '公開しています…' : '公開する'}</button>
+      <span class="note">${!tok ? '先に「GitHubとの接続」を設定してください。' : !chk ? '②でExcelをアップロードすると押せるようになります。' : chk.errors.length ? '②の問題を直してからアップロードし直してください。' : ''}</span></div>
+    ${sys.pubMsg ? `<p class="notice ${sys.pubOk ? 'info' : ''}">${esc(sys.pubMsg)}</p>` : ''}
+    <p class="note" style="margin-bottom:0">公開すると、1〜2分後に、生徒・先生がどの端末で開いても新しい入試日程になります（開いたままの人は再読み込み）。生徒が入力した受験校は消えません。日付を直した入試は、生徒の画面でも新しい日付に変わります。</p>
+  </section>
+  <details class="panel" style="margin-top:16px"><summary style="cursor:pointer;font-weight:700">Kei-Netのファイルから行を作る（必要なときだけ）</summary>
+    <p style="font-size:14px">Kei-Netの「入試日一覧」Excelを入れると、①のExcelと同じ形式の行（大学・学部・方式・試験日）を作ります。新しく大学を増やすときや、試験日をまとめて入れ直したいときの下書きに使えます。出願・発表・手続の日付は空欄です。</p>
+    <input type="file" id="kn-files" accept=".xlsx,.xls" multiple class="inp">
+    ${conv ? `<p class="notice info">${conv.files}ファイルから ${conv.rows.length}行（${conv.unis}大学）を読み取りました。</p>
+      <button class="btn primary" data-act="dl-conv">変換結果をExcelで保存</button>` : ''}
+  </details>`;
 }
 const MASTER_COLS = ['ID', '区分', '大学', '学部', '学科', '方式', '種別', '試験日', '出願開始', '出願締切', '合格発表', '手続締切', '偏差値帯', '備考', '確度', '出典'];
 function validateWorkbook(wb) {
@@ -1535,7 +1535,7 @@ document.addEventListener('click', async e => {
     case 'chk-publish': {
       const chk = STATE.teacher.chk; const sys = STATE.teacher.sys = STATE.teacher.sys || {}; if (!chk || !chk.buf || chk.errors.length) break;
       sys.busy = true; sys.pubMsg = ''; render();
-      try { await ghPutFile('data/master.xlsx', bufToB64(chk.buf), '大学データを更新'); sys.pubOk = true; sys.pubMsg = '公開しました。1〜2分で全員のページに反映されます。'; }
+      try { await ghPutFile('data/master.xlsx', bufToB64(chk.buf), '大学データを更新'); sys.pubOk = true; sys.pubMsg = '公開しました。1〜2分後から、新しい入試日程で表示されます。'; STATE.teacher.chk = null; }
       catch (ex) { sys.pubOk = false; sys.pubMsg = '公開できませんでした：' + ex.message; }
       sys.busy = false; render(); break;
     }
@@ -1547,7 +1547,7 @@ document.addEventListener('click', async e => {
       try {
         await ghPutFile('data/config.json', btoa(unescape(encodeURIComponent(JSON.stringify(cfg, null, 2)))), 'システム設定を更新');
         Object.assign(C, cfg); try { sessionStorage.setItem(TOK_KEY, C.TEACHER_PW_HASH); } catch (ex) { }
-        sys.cfgOk = true; sys.cfgMsg = '保存しました。1〜2分で全員のページに反映されます。' + (pw ? '教員パスワードも変更しました。' : '');
+        sys.cfgOk = true; sys.cfgMsg = '保存しました。1〜2分後から、生徒・先生のページに反映されます。' + (pw ? '教員パスワードも変更しました。' : '');
       } catch (ex) { sys.cfgOk = false; sys.cfgMsg = '保存できませんでした：' + ex.message; }
       render(); break;
     }
