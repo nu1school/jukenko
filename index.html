@@ -261,6 +261,10 @@ table.ex td.sj{font-size:12px;min-width:230px;max-width:340px;line-height:1.45}
 .subjchips{display:flex;flex-wrap:wrap;gap:6px}
 .fchip.sm{padding:3px 10px;font-size:12.5px}
 .fchip.strong{border-color:var(--ai);color:var(--ai);font-weight:700}
+.ghst{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;border-radius:10px;padding:10px 14px;font-size:14px;margin-bottom:8px}
+.ghst b{font-size:15px} .ghst span{font-size:13px;flex:1 1 260px}
+.ghst.ok{background:var(--c-ann-soft);color:var(--c-ann)} .ghst.ng{background:var(--warn-soft);color:var(--warn)}
+.ghst.warn{background:var(--warn-soft);color:var(--warn)} .ghst.wait{background:var(--sunken);color:var(--muted)}
 .sortsel{font-size:12px;color:var(--muted);display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
 .sortsel select{width:auto;padding:4px 8px;font-size:13px}
 table.ex th{background:var(--sunken);text-align:left;font-size:12px;color:var(--muted);font-weight:700;padding:6px 8px;white-space:nowrap}
@@ -380,6 +384,33 @@ async function ghFetch(path, opt = {}) {
   let j = null; try { j = await res.json(); } catch (e) { }
   if (!res.ok) { const m = res.status === 401 ? '合鍵が正しくないか、期限が切れています' : res.status === 403 ? 'この合鍵には書き込みの権限がありません' : res.status === 404 ? '合鍵の対象に jukenko が選ばれていません' : ((j && j.message) || ''); throw new Error(`${m}（${res.status}）`); }
   return j;
+}
+/* 公開できるかの確認（合鍵の有無・有効性・書き込み権限） */
+const GH_DATE_KEY = 'jukenko_planner_github_token_date';
+async function checkGh() {
+  const t = STATE.teacher;
+  if (!ghToken()) { t.gh = { st: 'none' }; return; }
+  t.gh = { st: 'checking' };
+  try {
+    const res = await fetch(`https://api.github.com/repos/${C.GITHUB_REPO}`, { cache: 'no-store', headers: { Accept: 'application/vnd.github+json', Authorization: 'Bearer ' + ghToken() } });
+    let j = null; try { j = await res.json(); } catch (e) { }
+    const exp = res.headers.get('github-authentication-token-expiration') || '';
+    let reg = ''; try { reg = localStorage.getItem(GH_DATE_KEY) || ''; } catch (e) { }
+    if (res.status === 401) t.gh = { st: 'bad', why: '合鍵の期限が切れているか、合鍵が正しくありません。作り直して貼り直してください。', reg };
+    else if (res.status === 404) t.gh = { st: 'bad', why: `この合鍵では ${C.GITHUB_REPO} を開けません。作るときに Resource owner と対象（jukenko）を選び直してください。組織の承認待ちの場合もあります。`, reg };
+    else if (!res.ok) t.gh = { st: 'bad', why: `GitHubに確認できませんでした（${res.status}）。時間をおいて開き直してください。`, reg };
+    else if (!(j && j.permissions && j.permissions.push)) t.gh = { st: 'bad', why: 'この合鍵は読み取り専用です。作るときに「Contents」を Read and write にしてください。', reg };
+    else t.gh = { st: 'ok', exp: normDate(exp.slice(0, 10)) || '', reg };
+  } catch (e) { t.gh = { st: 'bad', why: 'インターネットにつながっていないか、GitHubに接続できません。', offline: true }; }
+}
+function ghStatusHTML(big) {
+  const g = STATE.teacher.gh || { st: 'checking' };
+  if (g.st === 'checking') return `<div class="ghst wait">公開できるか確認しています…</div>`;
+  if (g.st === 'none') return `<div class="ghst ng"><b>✕ このパソコンからは、いま公開できません</b>${big ? '<span>「公開の合鍵」がまだ登録されていません。下の「公開の合鍵」に貼ると公開できるようになります。</span>' : ''}</div>`;
+  if (g.st === 'bad') return `<div class="ghst ng"><b>✕ このパソコンからは、いま公開できません</b><span>${esc(g.why)}</span>${big ? '<button class="btn sm" data-act="gh-recheck">もう一度確認</button>' : ''}</div>`;
+  const left = g.exp ? Math.round((dOf(g.exp) - dOf(today)) / 864e5) : null;
+  const expTxt = g.exp ? `合鍵の期限 ${fmt(g.exp)}（あと${left}日）` : (g.reg ? `合鍵の登録日 ${g.reg.replace(/-/g, '/')}（期限は作るときに決めた日、最長1年）` : '');
+  return `<div class="ghst ${left !== null && left <= 30 ? 'warn' : 'ok'}"><b>✓ このパソコンから公開できます</b>${expTxt ? `<span>${esc(expTxt)}${left !== null && left <= 30 ? '。期限が近いので、合鍵を作り直して貼り直してください' : ''}</span>` : ''}${big ? '<button class="btn sm ghost" data-act="gh-recheck">再確認</button>' : ''}</div>`;
 }
 async function ghPutFile(path, b64, message) {
   let sha;
@@ -1410,7 +1441,8 @@ function tDaysHTML() {
       <div class="names">${by[d].sort((a, b) => String(a.s.cls).localeCompare(String(b.s.cls), 'ja', { numeric: true }) || a.s.no - b.s.no).map(e => `<div>${esc(clsL(e.s.cls))} ${esc(e.s.no)}番 ${esc(e.s.name)}：${esc(label(e.x))} ${esc(e.x.met)}</div>`).join('')}</div></details>`).join('') || '<div class="empty">まだ受験予定が登録されていません。</div>'}</div>`;
 }
 function tDataHTML() {
-  const tok = ghToken(); const sys = STATE.teacher.sys || {};
+  const g = STATE.teacher.gh; if (!g) setTimeout(() => checkGh().then(() => { if (STATE.view === 'teacher' && STATE.teacher.tab === 'data') render(); }), 0);
+  const tok = !!(g && g.st === 'ok'); const sys = STATE.teacher.sys || {};
   const settings = `<section class="panel"><h3>基本設定</h3>
       <div class="field"><label for="cfg-school">学校名（画面とPDFに表示）</label><input id="cfg-school" class="inp" value="${esc(C.SCHOOL || '')}"></div>
       <div class="field"><label for="cfg-classes">組の選択肢（カンマ区切り。空欄なら生徒が自由入力）</label><input id="cfg-classes" class="inp" value="${esc((C.CLASSES || []).join(','))}" placeholder="A,B,C,D,E,F,G,H"></div>
@@ -1423,18 +1455,18 @@ function tDataHTML() {
           <li>できたリンクを上の欄に貼る。年度が変わっても、回答を削除すれば同じフォームを使い続けられます</li>
         </ol></details>
       <div class="field"><label for="cfg-pw">教員パスワードを変える（変えないときは空欄）</label><input id="cfg-pw" class="inp" type="password" autocomplete="new-password"></div>
-      <div class="tools"><button class="btn primary" data-act="cfg-save"${tok ? '' : ' disabled'}>設定を保存して公開</button>${tok ? '' : '<span class="note">保存するには、先に右の「公開の合鍵」を登録してください。</span>'}</div>
+      <div class="tools"><button class="btn primary" data-act="cfg-save"${tok ? '' : ' disabled'}>設定を保存して公開</button>${tok ? '' : '<span class="note">このパソコンから公開できる状態になると押せます（上の表示を確認）。</span>'}</div>
       ${sys.cfgMsg ? `<p class="notice ${sys.cfgOk ? 'info' : ''}">${esc(sys.cfgMsg)}</p>` : ''}
     </section>
     <section class="panel"><h3>公開の合鍵（パソコンごとに1回）</h3>
-      <p style="margin:0 0 8px" class="${tok ? 'okmsg' : ''}">${tok ? '✓ このパソコンは公開できます' : 'このパソコンはまだ公開できません'}</p>
       <p style="margin-top:0;font-size:14px">このページの本体と入試日程のExcelは、GitHubというネット上の置き場所に入っています。「公開する」「設定を保存して公開」は、その置き場所の中身を差し替える操作なので、<b>合鍵</b>が必要です。合鍵（github_pat_ で始まる文字列）を下に貼れば、このパソコンから公開できるようになります。合鍵はこのパソコンのブラウザにだけ保存されます。</p>
-      <div class="tools"><input id="gh-token" class="inp" type="password" autocomplete="off" placeholder="${tok ? '登録済み（貼り直すと上書き）' : 'github_pat_… を貼る'}" style="flex:1 1 240px">
-        <button class="btn" data-act="gh-save">登録する</button>${tok ? '<button class="btn ghost danger" data-act="gh-clear">登録を消す</button>' : ''}</div>
+      <div class="tools"><input id="gh-token" class="inp" type="password" autocomplete="off" placeholder="${ghToken() ? '登録済み（貼り直すと上書き）' : 'github_pat_… を貼る'}" style="flex:1 1 240px">
+        <button class="btn" data-act="gh-save">登録する</button>${ghToken() ? '<button class="btn ghost danger" data-act="gh-clear">登録を消す</button>' : ''}</div>
       ${sys.ghMsg ? `<p class="notice ${sys.ghOk ? 'info' : ''}">${esc(sys.ghMsg)}</p>` : ''}
-      <details style="font-size:13px"><summary style="cursor:pointer">合鍵の作り方（GitHubの管理者が行う）</summary>
+      <details style="font-size:13px"><summary style="cursor:pointer">合鍵の作り方</summary>
+        <p style="margin:6px 0">合鍵を作れるのは、GitHubの組織 <b>${esc(C.GITHUB_REPO.split('/')[0])}</b> のメンバーのアカウントです（だれのアカウントでもかまいません）。できた合鍵の文字列は、どのパソコンに貼っても使えます。</p>
         <ol style="padding-left:1.3em;line-height:1.8;margin:6px 0">
-          <li>GitHubにログインし、<b>https://github.com/settings/personal-access-tokens/new</b> を開く</li>
+          <li>メンバーのアカウントでGitHubにログインし、<b>https://github.com/settings/personal-access-tokens/new</b> を開く</li>
           <li>Token name に「受験校プランナー」、Expiration（有効期限）を最長に</li>
           <li>Resource owner を <b>${esc(C.GITHUB_REPO.split('/')[0])}</b> にし、Repository access で「Only select repositories」→ <b>${esc(C.GITHUB_REPO.split('/')[1])}</b> を選ぶ</li>
           <li>Permissions の「Contents」を <b>Read and write</b> にして「Generate token」</li>
@@ -1447,7 +1479,8 @@ function tDataHTML() {
   const conv = STATE.teacher.conv; const chk = STATE.teacher.chk;
   const list = (arr, cls) => arr.length ? `<ul class="chk ${cls}">${arr.slice(0, 40).map(t => `<li>${esc(t)}</li>`).join('')}${arr.length > 40 ? `<li>…ほか${arr.length - 40}件</li>` : ''}</ul>` : '';
   const ready = chk && !chk.errors.length && chk.buf;
-  return `${settings.replace('<section', '<div class="pf">' + '<section')}</div>
+  return `<div style="margin-bottom:14px">${ghStatusHTML(true)}</div>
+  ${settings.replace('<section', '<div class="pf">' + '<section')}</div>
   <h2 style="font-size:18px;margin:22px 0 10px">大学データ（入試日程）</h2>
   <div class="pf">
     <section class="panel"><h3>① 更新用Excelをダウンロード</h3>
@@ -1465,7 +1498,7 @@ function tDataHTML() {
   </div>
   <section class="panel" style="margin-top:16px"><h3>③ 公開</h3>
     <div class="tools"><button class="btn primary" data-act="chk-publish"${ready && tok && !sys.busy ? '' : ' disabled'}>${sys.busy ? '公開しています…' : '公開する'}</button>
-      <span class="note">${!tok ? '先に「公開の合鍵」を登録してください。' : !chk ? '②でExcelをアップロードすると押せるようになります。' : chk.errors.length ? '②の問題を直してからアップロードし直してください。' : ''}</span></div>
+      <span class="note">${!tok ? 'このパソコンから公開できる状態ではありません（ページ上部の表示を確認）。' : !chk ? '②でExcelをアップロードすると押せるようになります。' : chk.errors.length ? '②の問題を直してからアップロードし直してください。' : ''}</span></div>
     ${sys.pubMsg ? `<p class="notice ${sys.pubOk ? 'info' : ''}">${esc(sys.pubMsg)}</p>` : ''}
     <p class="note" style="margin-bottom:0">公開すると、1〜2分後に、生徒・先生がどの端末で開いても新しい入試日程になります（開いたままの人は再読み込み）。生徒が入力した受験校は消えません。日付を直した入試は、生徒の画面でも新しい日付に変わります。</p>
   </section>
@@ -1693,7 +1726,7 @@ document.addEventListener('click', async e => {
       const chk = STATE.teacher.chk; const sys = STATE.teacher.sys = STATE.teacher.sys || {}; if (!chk || !chk.buf || chk.errors.length) break;
       sys.busy = true; sys.pubMsg = ''; render();
       try { await ghPutFile('data/master.xlsx', bufToB64(chk.buf), '大学データを更新'); sys.pubOk = true; sys.pubMsg = '公開しました。1〜2分後から、新しい入試日程で表示されます。'; STATE.teacher.chk = null; }
-      catch (ex) { sys.pubOk = false; sys.pubMsg = '公開できませんでした：' + ex.message; }
+      catch (ex) { sys.pubOk = false; sys.pubMsg = '公開できませんでした：' + ex.message; await checkGh(); }
       sys.busy = false; render(); break;
     }
     case 'cfg-save': {
@@ -1710,12 +1743,13 @@ document.addEventListener('click', async e => {
     }
     case 'gh-save': {
       const sys = STATE.teacher.sys = STATE.teacher.sys || {}; const v = $('#gh-token').value.trim();
-      if (v) { try { localStorage.setItem(GH_KEY, v); } catch (ex) { } }
+      if (v) { try { localStorage.setItem(GH_KEY, v); localStorage.setItem(GH_DATE_KEY, today); } catch (ex) { } }
       try { const r = await ghFetch(''); sys.ghOk = !!(r.permissions && r.permissions.push); sys.ghMsg = sys.ghOk ? '登録しました。このパソコンから公開できます。' : 'この合鍵では書き込みができません。作るときに「Contents」を Read and write にしてください。'; }
       catch (ex) { sys.ghOk = false; sys.ghMsg = '登録できませんでした：' + ex.message; }
-      render(); break;
+      await checkGh(); render(); break;
     }
-    case 'gh-clear': { try { localStorage.removeItem(GH_KEY); } catch (ex) { } STATE.teacher.sys = {}; render(); toast('合鍵の登録を消しました'); break; }
+    case 'gh-clear': { try { localStorage.removeItem(GH_KEY); localStorage.removeItem(GH_DATE_KEY); } catch (ex) { } STATE.teacher.sys = {}; STATE.teacher.gh = { st: 'none' }; render(); toast('合鍵の登録を消しました'); break; }
+    case 'gh-recheck': STATE.teacher.gh = { st: 'checking' }; render(); await checkGh(); render(); break;
     case 'chk-preview': if (STATE.teacher.chk && STATE.teacher.chk.wb) { ingestWorkbook(STATE.teacher.chk.wb); STATE.preview = true; render(); toast('この端末だけ、チェックしたデータで表示しています'); } break;
     case 'imp-go': importTexts([($('#imp-text') || {}).value || '']); break;
     case 'imp-clear': try { sessionStorage.removeItem(T_KEY); } catch (ex) { } STATE.teacher.students = []; STATE.teacher.sel = new Set(); STATE.teacher.imp = ''; render(); break;
