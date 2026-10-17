@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """入試マスタ（master.xlsx）を作る。
-usage: python3 -I build_master.py <raw.json> <haiten.json> <out.xlsx>
+usage: python3 -I build_master.py <raw.json> <haiten.json> <out.xlsx> [haiten_full.json]
+haiten_full.json があれば、受験科目・配点の列も埋める。
 """
 import sys, json, re, hashlib, collections
 sys.path.insert(0, __import__('os').path.dirname(__file__))
@@ -10,6 +11,7 @@ from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 
 raw, haiten_p, out = sys.argv[1:4]
+full_p = sys.argv[4] if len(sys.argv) > 4 else None
 GROUP_OF = {u: g for g, us in GROUPS.items() for u in us}
 METHOD_HINT = ('方式', '日程', '全学', '学部', '統一', '英語', '技能', '科目', '教科', '型', 'コア', 'プラス', '期',
                '共通', '併用', '利用', '地域枠', 'ＴＥＡＰ', '多面的')
@@ -140,18 +142,32 @@ for z in rows:
     ids.add(i)
     z['id'] = i
 
+# ---------- 受験科目・配点 ----------
+nsub = collections.Counter()
+if full_p:
+    import haiten_match as HM
+    from subjects import summarize
+    HM.load(json.load(open(full_p)))
+    for z in rows:
+        d, how = HM.find(z['u'], z['f'], z['g'], z['m'], z['kind'])
+        z['sub'] = summarize(d) if d else {}
+        nsub['あり' if d else 'なし'] += 1
+print('科目データ', nsub)
+
 # ---------- 書き出し ----------
 wb = Workbook()
 ws = wb.active
 ws.title = '入試日程'
 cols = ['ID', '区分', '大学', '学部', '学科', '方式', '種別', '試験日', '出願開始', '出願締切', '合格発表', '手続締切',
-        '偏差値帯', '備考', '確度', '出典']
+        'ボーダー偏差値', '共テボーダー', '共テ科目', '共テ配点', '個別科目', '個別配点', '科目要件', '備考', '確度', '出典']
 ws.append(cols)
 for z in rows:
     r = z['r']
     ws.append([z['id'], GROUP_OF[z['u']], z['u'], z['f'], z['g'], z['m'], z['kind'], z['date'], r['open'], r['close'],
-               r['ann'], r['proc'], z['rank'], z['note'], r['conf'], r['src'] or z['src2']])
-widths = [10, 12, 14, 18, 26, 22, 9, 11, 11, 11, 11, 11, 12, 50, 14, 24]
+               r['ann'], r['proc'], z['rank'], '', z.get('sub', {}).get('kt', ''), z.get('sub', {}).get('kp', ''),
+               z.get('sub', {}).get('nt', ''), z.get('sub', {}).get('np', ''), z.get('sub', {}).get('req', ''),
+               z['note'], r['conf'], r['src'] or z['src2']])
+widths = [10, 12, 14, 18, 26, 22, 9, 11, 11, 11, 11, 11, 12, 11, 44, 8, 40, 8, 30, 50, 14, 24]
 hdr = PatternFill('solid', fgColor='1F3A5F')
 for i, w in enumerate(widths, 1):
     ws.column_dimensions[get_column_letter(i)].width = w
@@ -192,7 +208,7 @@ nrow = ws.max_row + 2000
 dv_kind = DataValidation(type='list', formula1='"一般,共テ併用,共テ利用,国公立"', allow_blank=True)
 dv_conf = DataValidation(type='list', formula1='"確定,目安,前年参考,要確認"', allow_blank=True, showErrorMessage=False)
 dv_grp = DataValidation(type='list', formula1="=大学!$D$2:$D$60", allow_blank=True, showErrorMessage=False)
-for dv, col in [(dv_kind, 'G'), (dv_conf, 'O'), (dv_grp, 'B')]:
+for dv, col in [(dv_kind, 'G'), (dv_conf, 'U'), (dv_grp, 'B')]:
     ws.add_data_validation(dv); dv.add(f'{col}2:{col}{nrow}')
 
 w4 = wb.create_sheet('使い方')
@@ -230,7 +246,13 @@ for r in [
     ['出願締切', '', 'yyyy-mm-dd（Web出願の締切。郵送必着などは備考へ）', '2027-01-18'],
     ['合格発表', '', 'yyyy-mm-dd', '2027-02-15'],
     ['手続締切', '', 'yyyy-mm-dd（入学金の第1次締切）', '2027-02-24'],
-    ['偏差値帯', '', '河合塾のボーダー帯など。不明なら空欄。', '60.0～62.4'],
+    ['ボーダー偏差値', '', '河合塾のボーダー偏差値（帯）など。不明なら空欄。旧名「偏差値帯」でも読める。', '60.0～62.4'],
+    ['共テボーダー', '', '共通テストのボーダー得点率（%）。数字だけ書く。共テ利用・共テ併用・国公立の行に。', '78'],
+    ['共テ科目', '', '共通テストで使う科目と配点。〔 〕は「どれか選ぶ」、〈 〉は教科をまたいで選ぶ。「・」で区切る。', '英200・数ⅠA・ⅡBC200・〔物/化/生〕200'],
+    ['共テ配点', '', '共通テストの合計点（数字）。', '600'],
+    ['個別科目', '', '大学の個別試験（一般方式の試験・国公立の2次）の科目と配点。書き方は共テ科目と同じ。面接・小論文・英語資格もここに。', '英100・数ⅠⅡⅢABC200・〔物/化/生〕100'],
+    ['個別配点', '', '個別試験の合計点（数字）。', '400'],
+    ['科目要件', '', '「受験科目で絞り込み」用。空欄なら絞り込みでも常に表示。書き方：テ:（共テ） 個:（個別）を「 | 」で区切り、科目を空白で区切る。どれか選ぶ科目は「/」、2つ選ぶなら「*2」。使える記号：英 国 数ⅠA 数ⅡBC 数Ⅲ 物 化 生 地学 基礎 日 世 地理 倫 政 情（* は科目以外で代えられる枠）。', 'テ:英 数ⅠA 数ⅡBC 物/化/生 | 個:英 数Ⅲ 物/化*2'],
     ['備考', '', '試験日が選べる、2次試験がある、など。', '試験日自由選択'],
     ['確度', '', '確定（その年度の公表値）／目安／前年参考／要確認。', '確定'],
     ['出典', '', '調べた資料の名前やURL。', '大学公式サイト 入試日程'],
@@ -254,6 +276,8 @@ prompt = """添付のExcel（受験校プランナーの大学データ）を、
 ・出願開始・出願締切・合格発表・手続締切は、各大学の公式の入試日程（募集要項・入試ガイド）や、河合塾Kei-Net、ベネッセ マナビジョン、旺文社パスナビで調べる。
 ・調べた日付には「確度」に「確定」、出典に資料名かURLを書く。まだ発表されていない日付は推測で埋めず空欄にし、確度を「要確認」にする。前年の日付を参考に入れる場合は確度を「前年参考」にする。
 ・国公立の前期・後期は共通日程で入れ、確度は「目安」。
+・ボーダー偏差値・共テボーダー（得点率%、数字のみ）は、業者や河合塾などの資料があれば入れる。なければ空欄。
+・共テ科目・共テ配点・個別科目・個別配点・科目要件は、入試方式が変わった行だけ直す（書き方は「記入ルール」シート）。新しい行で分からなければ空欄でよい。
 ・「設定」シートの年度・共通テスト1日目・2日目・カレンダー開始・カレンダー終了・データ更新日を新しい年度の値にする。
 ・最後に、確度が「要確認」「前年参考」の行がどの大学に何行あるかを一覧で報告する。
 
