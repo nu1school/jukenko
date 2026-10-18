@@ -1452,7 +1452,7 @@ function importPanelHTML() {
        <div id="fbStatus" style="margin-top:6px">${fbStatusHTML()}</div>`
     : `<form id="fbLogin" class="tools" style="margin:0;align-items:center" autocomplete="on"><input id="fb-email" class="inp" type="email" autocomplete="username" placeholder="先生用ログインのメール" style="flex:1 1 200px"><input id="fb-pw" class="inp" type="password" autocomplete="current-password" placeholder="パスワード" style="flex:1 1 140px">
        <label style="font-size:13px"><input type="checkbox" id="fb-remember" checked> このパソコンで覚える</label><button class="btn primary" type="submit">ログインして受け取る</button></form>
-       ${(t.fb || {}).err ? `<div style="margin-top:6px">${fbStatusHTML()}</div>` : '<p class="note" style="margin:6px 0 0">生徒が「先生に提出」を押した内容を、ここで自動で受け取ります。最初だけ先生用のログインが必要です。</p>'}`;
+       ${(t.fb || {}).err ? `<div style="margin-top:6px">${fbStatusHTML()}</div>` : '<p class="note" style="margin:6px 0 0">生徒が「先生に提出」を押した内容を、ここで自動で受け取ります。先生用ログインは、須藤の学校のメールアドレスと学校のパスワードです。</p>'}`;
   return `<section class="panel imp" style="margin-bottom:14px"><h3>提出データ</h3>${top}<p class="note" style="margin:8px 0 0">${t.students.length}人分を表示中。</p></section>`;
 }
 async function importTexts(texts, quiet) {
@@ -1612,6 +1612,7 @@ function tDataHTML() {
       <div class="field"><label>提出の受け取り：Firebase（Google）</label>
         <div class="row2"><input id="cfg-fbk" class="inp num" placeholder="apiKey（AIza…）" value="${esc(C.FB_API_KEY || '')}"><input id="cfg-fbp" class="inp num" placeholder="projectId" value="${esc(C.FB_PROJECT_ID || '')}"></div>
         <p class="note" style="margin:4px 0 0">${fbReady() ? '✓ 設定済み：生徒の「先生に提出」は Firebase に届きます。' : '未設定です。下の手順で準備してください（設定するまで、生徒は提出できません）。'}</p></div>
+      <p class="notice info" style="font-size:13px;margin:0 0 10px"><b>現在の先生用ログイン</b>：メールアドレスは<b>須藤の学校のメールアドレス</b>、パスワードは<b>須藤の学校のパスワード</b>（登録した時点のもの）。学校のパスワードを変えても、こちらは自動では変わりません。変えるときは、Firebaseの「Authentication」→「Users」で変更します。</p>
       <details style="font-size:13px;margin-bottom:10px"><summary style="cursor:pointer">Firebaseの準備（最初に1回だけ・15分ほど）</summary>
         <ol style="padding-left:1.3em;line-height:1.8;margin:6px 0">
           <li>Googleアカウントで <b>https://console.firebase.google.com</b> を開き、「プロジェクトを作成」。名前は例：jukenko-planner。Googleアナリティクスはオフでよい</li>
