@@ -464,7 +464,11 @@ async function fbQuery(op, year) {
   const sq = { structuredQuery: { from: [{ collectionId: 'subs' }], where: { fieldFilter: { field: { fieldPath: 'y' }, op, value: { stringValue: String(year) } } } } };
   const r = await fetch(`${fbDocs()}:runQuery`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok }, body: JSON.stringify(sq) });
   if (r.status === 401) { fbLogout(); throw Object.assign(new Error('ログインし直してください'), { needLogin: true }); }
-  if (r.status === 403) throw new Error('読む権限がありません。Firebaseの「ルール」に、このログインのメールアドレスが入っているか確認してください');
+  if (r.status === 403) {
+    let m = ''; try { m = JSON.stringify(await r.json()); } catch (e) { }
+    if (/has not been used|is disabled|SERVICE_DISABLED/i.test(m)) throw new Error('Firestoreのデータベースがまだ作られていません。Firebaseの「Firestore Database」で「データベースを作成」してください');
+    throw new Error('読む権限がありません。Firebaseの「Firestore Database」→「ルール」に、このログインのメールアドレスが入っているか確認してください');
+  }
   if (r.status === 404) throw new Error('Firestoreのデータベースが見つかりません（projectId と、データベースを作成したかを確認）');
   if (!r.ok) throw new Error(`読み込めませんでした（${r.status}）`);
   const arr = await r.json();
