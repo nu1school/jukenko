@@ -30,7 +30,10 @@ window.CONFIG = {
   GITHUB_BRANCH: 'main',
   // Microsoft 365 連携（Formsの回答Excelを教員ページから直接読む）。システム設定で入れると config.json に保存されます
   MS_CLIENT_ID: '',
-  MS_TENANT_ID: ''
+  MS_TENANT_ID: '',
+  // Firebase（Google）での提出・自動受け取り。システム設定で入れると config.json に保存されます
+  FB_API_KEY: '',
+  FB_PROJECT_ID: ''
 };
 </script>
 <style>
@@ -264,6 +267,8 @@ table.ex td.sj{font-size:12px;min-width:230px;max-width:340px;line-height:1.45}
 .subjchips{display:flex;flex-wrap:wrap;gap:6px}
 .fchip.sm{padding:3px 10px;font-size:12.5px}
 .fchip.strong{border-color:var(--ai);color:var(--ai);font-weight:700}
+.livedot{color:var(--c-ann);font-size:12px;animation:blink 2s infinite}
+@keyframes blink{50%{opacity:.35}}
 .msbar{background:var(--sunken);border-radius:10px;padding:10px 12px}
 .mspick{margin-top:8px} .mslist{margin:6px 0 0;padding-left:1.2em;font-size:14px;line-height:1.9}
 .ghst{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;border-radius:10px;padding:10px 14px;font-size:14px;margin-bottom:8px}
@@ -575,8 +580,104 @@ function msAuto() {
     if (STATE.view === 'teacher' && document.visibilityState === 'visible' && msFile() && msTok() && !(STATE.teacher.ms || {}).needLogin) msPull(false);
   }, 5 * 60e3);
 }
+/* ============================================================
+   Firebase（Google）：生徒はボタン1つで提出、先生は開くだけで最新を受け取る
+   ・生徒は「新しく提出する」ことだけできる。読む・消すは先生用ログインのみ（Firestoreのルールで制限）
+   ============================================================ */
+const fbReady = () => !!(C.FB_API_KEY && C.FB_PROJECT_ID);
+const FB_AUTH_KEY = 'jukenko_planner_fb_auth';
+const fbDocs = () => `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(C.FB_PROJECT_ID)}/databases/(default)/documents`;
+async function fbSubmit(me, code) {
+  const body = { fields: { y: { stringValue: String(M.settings.year || '') }, c: { stringValue: String(me.cls) }, n: { stringValue: String(me.no) }, code: { stringValue: code }, t: { stringValue: new Date().toISOString() } } };
+  const r = await fetch(`${fbDocs()}/subs?key=${encodeURIComponent(C.FB_API_KEY)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!r.ok) { let m = ''; try { m = (await r.json()).error.message; } catch (e) { } throw new Error(`提出できませんでした（${r.status}）${m ? '：' + m : ''}`); }
+}
+function fbAuth() { try { return JSON.parse(localStorage.getItem(FB_AUTH_KEY) || sessionStorage.getItem(FB_AUTH_KEY)) || null; } catch (e) { return null; } }
+function fbSaveAuth(a) { try { (a.remember ? localStorage : sessionStorage).setItem(FB_AUTH_KEY, JSON.stringify(a)); } catch (e) { } }
+function fbLogout() { try { localStorage.removeItem(FB_AUTH_KEY); sessionStorage.removeItem(FB_AUTH_KEY); } catch (e) { } }
+async function fbSignIn(email, pw, remember) {
+  const r = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${encodeURIComponent(C.FB_API_KEY)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password: pw, returnSecureToken: true }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const m = (j.error && j.error.message) || '';
+    throw new Error(/INVALID|PASSWORD|EMAIL_NOT_FOUND|USER_DISABLED/.test(m) ? 'メールアドレスかパスワードが違います' : /TOO_MANY/.test(m) ? '失敗が続いたので、しばらく待ってから試してください' : /OPERATION_NOT_ALLOWED|CONFIGURATION_NOT_FOUND/.test(m) ? 'Firebaseで「メール/パスワード」のログインが有効になっていません' : /API_KEY|API key/.test(m) ? 'システム設定の apiKey が正しくありません' : 'ログインできませんでした：' + m);
+  }
+  const a = { email, idToken: j.idToken, refresh: j.refreshToken, exp: Date.now() + (+j.expiresIn - 120) * 1000, remember: !!remember };
+  fbLogout(); fbSaveAuth(a); return a;
+}
+async function fbToken() {
+  const a = fbAuth(); if (!a) throw Object.assign(new Error('ログインしてください'), { needLogin: true });
+  if (Date.now() < a.exp) return a.idToken;
+  const r = await fetch(`https://securetoken.googleapis.com/v1/token?key=${encodeURIComponent(C.FB_API_KEY)}`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: a.refresh }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { fbLogout(); throw Object.assign(new Error('ログインの期限が切れました。もう一度ログインしてください'), { needLogin: true }); }
+  Object.assign(a, { idToken: j.id_token, refresh: j.refresh_token, exp: Date.now() + (+j.expires_in - 120) * 1000 }); fbSaveAuth(a);
+  return a.idToken;
+}
+async function fbQuery(op, year) {
+  const tok = await fbToken();
+  const sq = { structuredQuery: { from: [{ collectionId: 'subs' }], where: { fieldFilter: { field: { fieldPath: 'y' }, op, value: { stringValue: String(year) } } } } };
+  const r = await fetch(`${fbDocs()}:runQuery`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok }, body: JSON.stringify(sq) });
+  if (r.status === 401) { fbLogout(); throw Object.assign(new Error('ログインし直してください'), { needLogin: true }); }
+  if (r.status === 403) throw new Error('読む権限がありません。Firebaseの「ルール」に、このログインのメールアドレスが入っているか確認してください');
+  if (r.status === 404) throw new Error('Firestoreのデータベースが見つかりません（projectId と、データベースを作成したかを確認）');
+  if (!r.ok) throw new Error(`読み込めませんでした（${r.status}）`);
+  const arr = await r.json();
+  return arr.filter(x => x.document).map(x => { const f = x.document.fields || {}; const g = k => (f[k] && f[k].stringValue) || ''; return { name: x.document.name, y: g('y'), c: g('c'), n: g('n'), code: g('code'), t: g('t') }; });
+}
+async function fbDelete(names) {
+  const tok = await fbToken(); let n = 0;
+  for (const nm of names) { const r = await fetch(`https://firestore.googleapis.com/v1/${nm}`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + tok } }); if (r.ok) n++; }
+  return n;
+}
+async function fbPull() {
+  const t = STATE.teacher; if (!fbReady() || !fbAuth()) return;
+  if (t.fb && t.fb.busy) return;
+  t.fb = Object.assign({}, t.fb, { busy: true, err: '' }); const el = $('#fbStatus'); if (el) el.innerHTML = fbStatusHTML();
+  try {
+    const docs = await fbQuery('EQUAL', M.settings.year);
+    const r = await importTexts(docs.map(d => d.code), true);
+    // 同じ生徒の古い提出は片付ける（最新だけ残す）
+    const latest = {}; docs.forEach(d => { const k = d.c + '#' + d.n; if (!latest[k] || d.t > latest[k].t) latest[k] = d; });
+    const old = docs.filter(d => latest[d.c + '#' + d.n] !== d).slice(0, 40).map(d => d.name);
+    if (old.length) fbDelete(old).catch(() => { });
+    t.fb = { at: new Date().toTimeString().slice(0, 5), summary: r };
+  } catch (e) { t.fb = { err: e.message, needLogin: !!e.needLogin }; }
+  if (STATE.view === 'teacher') render();
+}
+let fbTimer = null;
+function fbAuto() {
+  if (STATE.view !== 'teacher' || !isTeacherOk() || !fbReady()) return;
+  const t = STATE.teacher;
+  if (!t.fbAutoDone && fbAuth()) { t.fbAutoDone = true; fbPull(); }
+  if (!fbTimer) fbTimer = setInterval(() => { if (STATE.view === 'teacher' && document.visibilityState === 'visible' && fbAuth() && !(STATE.teacher.fb || {}).err) fbPull(); }, 2 * 60e3);
+}
+function fbStatusHTML() {
+  const f = STATE.teacher.fb || {};
+  if (f.busy) return '<span class="note">受け取っています…</span>';
+  if (f.err) return `<span class="w bad">${esc(f.err)}</span>`;
+  if (f.at) return `<span class="okmsg">${esc(f.at)} に受け取りました。</span><span class="note">${esc(f.summary || '')}　開いている間は2分ごとに自動で受け取ります。</span>`;
+  return '';
+}
+function fbRules(email) {
+  const e = String(email || '').trim().toLowerCase() || '先生用ログインのメールアドレス';
+  return `rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /subs/{id} {
+      // 生徒：新しく提出することだけできる（読む・消す・書き換えるはできない）
+      allow create: if request.resource.data.keys().hasOnly(['y', 'c', 'n', 'code', 't'])
+        && request.resource.data.code is string && request.resource.data.code.size() < 40000
+        && request.resource.data.c is string && request.resource.data.c.size() < 20
+        && request.resource.data.n is string && request.resource.data.n.size() < 10;
+      // 先生：このメールアドレスでログインしたときだけ、読む・消すができる
+      allow read, delete: if request.auth != null && request.auth.token.email in ['${e}'];
+    }
+  }
+}`;
+}
 async function loadConfigFile() {
-  try { const r = await fetch(C.CONFIG_URL, { cache: 'no-cache' }); if (!r.ok) return; const j = await r.json(); ['SCHOOL', 'CLASSES', 'FORM_URL', 'TEACHER_PW_HASH', 'MS_CLIENT_ID', 'MS_TENANT_ID'].forEach(k => { if (j[k] !== undefined && j[k] !== null) C[k] = j[k]; }); } catch (e) { }
+  try { const r = await fetch(C.CONFIG_URL, { cache: 'no-cache' }); if (!r.ok) return; const j = await r.json(); ['SCHOOL', 'CLASSES', 'FORM_URL', 'TEACHER_PW_HASH', 'MS_CLIENT_ID', 'MS_TENANT_ID', 'FB_API_KEY', 'FB_PROJECT_ID'].forEach(k => { if (j[k] !== undefined && j[k] !== null) C[k] = j[k]; }); } catch (e) { }
 }
 const normName = s => String(s || '').replace(/[\s　]+/g, '');
 let toastTimer;
@@ -1047,8 +1148,8 @@ function planHTML() {
     <aside class="side">
       <div class="panel export" id="submitPanel"><h3>先生に提出</h3>
         <div id="submitState" style="font-size:13px">${submitStateHTML()}</div>
-        <button class="btn primary" data-act="submit">${C.FORM_URL ? 'フォームで提出する' : '提出用コードをコピー'}</button>
-        <p class="note" style="margin:0">${C.FORM_URL ? 'フォームが開いて入力済みになっています。最後にフォームの「送信」を押してください。' : 'コピーしたコードを、先生の指示した場所（Classroomなど）に貼って提出してください。'}</p>
+        <button class="btn primary" data-act="submit">${fbReady() ? '先生に提出する' : C.FORM_URL ? 'フォームで提出する' : '提出用コードをコピー'}</button>
+        <p class="note" style="margin:0">${fbReady() ? '押すとすぐ先生に届きます。内容を変えたら、もう一度押してください。' : C.FORM_URL ? 'フォームが開いて入力済みになっています。最後にフォームの「送信」を押してください。' : 'コピーしたコードを、先生の指示した場所（Classroomなど）に貼って提出してください。'}</p>
         <details><summary style="cursor:pointer;font-size:13px">復元コード（バックアップ）</summary>
           <textarea id="codeBox" class="inp num" rows="4" readonly style="font-size:11px;margin-top:6px;word-break:break-all">${esc(STATE.code)}</textarea>
           <button class="btn sm" data-act="copycode" style="margin-top:6px">コピー</button>
@@ -1484,6 +1585,22 @@ function importPanelHTML() {
   const pickBtn = (primary) => canRemember()
     ? `<button class="btn${primary ? ' primary' : ''}" data-act="lf-pick">${lf ? '別のExcelを選ぶ' : 'Excelを選ぶ'}</button>`
     : `<label class="btn${primary ? ' primary' : ''}" style="cursor:pointer">Excelを選ぶ<input type="file" id="imp-files" accept=".xlsx,.xls,.csv,.txt" multiple hidden></label>`;
+  const fa = fbReady() && fbAuth();
+  if (fbReady()) {
+    const top = fa
+      ? `<div class="tools" style="margin:0;align-items:center"><span class="livedot">●</span><b>提出を自動で受け取っています</b><button class="btn sm" data-act="fb-pull">今すぐ受け取る</button><span class="note">${esc(fa.email)}</span><button class="btn sm ghost" data-act="fb-logout">ログアウト</button></div>
+         <div id="fbStatus" style="margin-top:6px">${fbStatusHTML()}</div>`
+      : `<form id="fbLogin" class="tools" style="margin:0;align-items:center" autocomplete="on"><input id="fb-email" class="inp" type="email" autocomplete="username" placeholder="先生用ログインのメール" style="flex:1 1 200px"><input id="fb-pw" class="inp" type="password" autocomplete="current-password" placeholder="パスワード" style="flex:1 1 140px">
+         <label style="font-size:13px"><input type="checkbox" id="fb-remember" checked> このパソコンで覚える</label><button class="btn primary" type="submit">ログインして受け取る</button></form>
+         ${(STATE.teacher.fb || {}).err ? `<div style="margin-top:6px">${fbStatusHTML()}</div>` : '<p class="note" style="margin:6px 0 0">生徒が「先生に提出」を押した内容を、ここで自動で受け取ります。最初だけ先生用のログインが必要です。</p>'}`;
+    return `<section class="panel imp" style="margin-bottom:14px"><h3>提出データ</h3>${top}
+    <details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px;color:var(--muted)">ほかの読み込み方（Formsの回答Excel・貼り付け）</summary><div style="margin-top:8px">
+      <div class="tools" style="margin:0 0 8px">${pickBtn(false)}${lf ? `<button class="btn" data-act="lf-read">最新を読み込む（${esc(lf.name)}）</button>` : ''}</div>${lf ? lfStatusHTML() : ''}
+      <textarea id="imp-text" class="inp" rows="3" placeholder="コードを貼ったメールなどを、ここに貼り付け"></textarea>
+      <div class="tools" style="margin:6px 0 0"><button class="btn" data-act="imp-go">貼り付けた内容を読み込む</button><button class="btn ghost" data-act="imp-clear">読み込んだデータを消す</button></div>
+    </div></details>
+    <p class="note" style="margin:8px 0 0">${t.students.length}人分を表示中。</p></section>`;
+  }
   const main = msOn
     ? `<button class="btn primary" data-act="ms-pull">Formsから最新を読み込む</button>${pickBtn(false)}`
     : lf ? `<button class="btn primary" data-act="lf-read">最新を読み込む</button><span class="note">${esc(lf.name)}</span>${pickBtn(false)}`
@@ -1667,6 +1784,23 @@ function tDataHTML() {
           <li>「…」→「事前入力済みリンクを取得」で、組に <b>CLASS</b>、番号に <b>NO</b>、氏名に <b>NAME</b>、提出コードに <b>CODE</b> と入れてリンクを作る</li>
           <li>できたリンクを上の欄に貼る。年度が変わっても、回答を削除すれば同じフォームを使い続けられます</li>
         </ol></details>
+      <div class="field"><label>提出の受け取り：Firebase（Google）</label>
+        <div class="row2"><input id="cfg-fbk" class="inp num" placeholder="apiKey（AIza…）" value="${esc(C.FB_API_KEY || '')}"><input id="cfg-fbp" class="inp num" placeholder="projectId" value="${esc(C.FB_PROJECT_ID || '')}"></div>
+        <p class="note" style="margin:4px 0 0">${fbReady() ? '✓ 設定済み：生徒の「先生に提出」は Firebase に届きます（Formsは使いません）。' : '空欄のときは、上のFormsで提出します。'}</p></div>
+      <details style="font-size:13px;margin-bottom:10px"><summary style="cursor:pointer">Firebaseの準備（最初に1回だけ・15分ほど）</summary>
+        <ol style="padding-left:1.3em;line-height:1.8;margin:6px 0">
+          <li>Googleアカウントで <b>https://console.firebase.google.com</b> を開き、「プロジェクトを作成」。名前は例：jukenko-planner。Googleアナリティクスはオフでよい</li>
+          <li>左のメニュー「構築」→「<b>Authentication</b>」→「始める」→「メール / パスワード」を有効にして保存。「Users」タブの「ユーザーを追加」で、先生用のログインを作る（メールは実在しないものでもよい。例：sensei@jukenko.school）</li>
+          <li>「構築」→「<b>Firestore Database</b>」→「データベースを作成」。ロケーションは <b>asia-northeast1（東京）</b>、「本番環境モード」で作成</li>
+          <li>Firestoreの「<b>ルール</b>」タブを開き、中身を全部消して、下で作ったルールを貼り付けて「公開」</li>
+          <li>左上の歯車 →「プロジェクトの設定」→「マイアプリ」の「&lt;/&gt;」（ウェブ）でアプリを登録（名前は何でも。Hostingは不要）。表示される <b>apiKey</b> と <b>projectId</b> を上の2つの欄に貼り、「設定を保存して公開」</li>
+          <li>「生徒一覧」タブで、2.で作った先生用のメールとパスワードでログイン</li>
+        </ol>
+        <div class="field" style="margin-top:6px"><label for="fb-rule-email">ルールを作る：先生用ログインのメールアドレス</label><input id="fb-rule-email" class="inp" type="email" placeholder="sensei@jukenko.school"></div>
+        <textarea id="fb-rules" class="inp num" rows="9" readonly style="font-size:11px">${esc(fbRules(''))}</textarea>
+        <div class="tools" style="margin-top:6px"><button class="btn sm" data-act="fb-rules-copy">ルールをコピー</button></div>
+        <p style="margin:4px 0 0">先生用ログインを複数作るときは、ルールの ['…'] の中に 'a@x', 'b@x' のようにカンマで並べます。このアカウントの持ち主の名前は、生徒にも先生にも表示されません。</p>
+        ${fbReady() ? '<div class="tools" style="margin-top:8px"><button class="btn sm ghost danger" data-act="fb-clean">今年度以外の提出データを削除</button></div>' : ''}</details>
       <div class="field"><label>Microsoft 365 連携（Formsの回答を自動で読み込む・任意）</label>
         <div class="row2"><input id="cfg-msc" class="inp num" placeholder="アプリケーション（クライアント）ID" value="${esc(C.MS_CLIENT_ID || '')}"><input id="cfg-mst" class="inp num" placeholder="ディレクトリ（テナント）ID" value="${esc(C.MS_TENANT_ID || '')}"></div></div>
       <details style="font-size:13px;margin-bottom:10px"><summary style="cursor:pointer">2つのIDの取り方（学校で最初に1回だけ）</summary>
@@ -1869,7 +2003,12 @@ async function convertKeinet(files) {
    イベント
    ============================================================ */
 function afterRender() {
-  renderSave(); msAuto(); if (STATE.view === 'teacher' && isTeacherOk()) lfInit();
+  renderSave(); msAuto(); fbAuto(); if (STATE.view === 'teacher' && isTeacherOk()) lfInit();
+  const fl = $('#fbLogin'); if (fl) fl.addEventListener('submit', async ev => {
+    ev.preventDefault(); const b = $('button[type=submit]', fl); b.disabled = true; b.textContent = 'ログインしています…';
+    try { await fbSignIn($('#fb-email').value.trim(), $('#fb-pw').value, $('#fb-remember').checked); STATE.teacher.fb = null; STATE.teacher.fbAutoDone = true; render(); await fbPull(); }
+    catch (ex) { STATE.teacher.fb = { err: ex.message }; render(); }
+  });
   const lf = $('#loginForm'); if (lf) lf.addEventListener('submit', doLogin);
   const tf = $('#tForm'); if (tf) tf.addEventListener('submit', doTLogin);
   $$('details.fac').forEach(d => d.addEventListener('toggle', () => {
@@ -1935,6 +2074,11 @@ document.addEventListener('click', async e => {
     case 'submit': {
       STATE.code = await encodeCode(STATE.me);
       if (!STATE.me.picks.length) { toast('先に受験校を追加してください'); break; }
+      if (fbReady()) {
+        try { t.disabled = true; await fbSubmit(STATE.me, STATE.code); STATE.me.submittedAt = STATE.me.updated; storeMe(); toast('提出しました。先生に届いています'); }
+        catch (ex) { toast(ex.message + '。時間をおいてもう一度押してください'); }
+        t.disabled = false; const st0 = $('#submitState'); if (st0) st0.innerHTML = submitStateHTML(); break;
+      }
       const url = formUrl(STATE.me, STATE.code);
       if (url) { STATE.me.submittedAt = STATE.me.updated; storeMe(); window.open(url, '_blank'); }
       else { const ok = await copyText(STATE.code); STATE.me.submittedAt = STATE.me.updated; storeMe(); toast(ok ? '提出用コードをコピーしました。先生の指示した場所に貼ってください' : '下の復元コードを選んでコピーしてください'); if (STATE.tab !== 'plan') { STATE.tab = 'plan'; render(); } }
@@ -1957,7 +2101,8 @@ document.addEventListener('click', async e => {
     }
     case 'cfg-save': {
       const sys = STATE.teacher.sys = STATE.teacher.sys || {};
-      const cfg = { SCHOOL: $('#cfg-school').value.trim(), CLASSES: $('#cfg-classes').value.split(/[,、，\s]+/).map(x => x.trim()).filter(Boolean), FORM_URL: $('#cfg-form').value.trim(), TEACHER_PW_HASH: C.TEACHER_PW_HASH, MS_CLIENT_ID: $('#cfg-msc').value.trim(), MS_TENANT_ID: $('#cfg-mst').value.trim(), updated: nowStr() };
+      const cfg = { SCHOOL: $('#cfg-school').value.trim(), CLASSES: $('#cfg-classes').value.split(/[,、，\s]+/).map(x => x.trim()).filter(Boolean), FORM_URL: $('#cfg-form').value.trim(), TEACHER_PW_HASH: C.TEACHER_PW_HASH, MS_CLIENT_ID: $('#cfg-msc').value.trim(), MS_TENANT_ID: $('#cfg-mst').value.trim(), FB_API_KEY: $('#cfg-fbk').value.trim(), FB_PROJECT_ID: $('#cfg-fbp').value.trim(), updated: nowStr() };
+      if ((cfg.FB_API_KEY || cfg.FB_PROJECT_ID) && !(/^AIza[\w-]{30,}$/.test(cfg.FB_API_KEY) && /^[a-z0-9-]{4,40}$/.test(cfg.FB_PROJECT_ID))) { sys.cfgOk = false; sys.cfgMsg = 'Firebaseの apiKey（AIza で始まる文字）と projectId（英小文字・数字・ハイフン）を、両方とも正しく入れてください。'; render(); break; }
       const guid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       if ((cfg.MS_CLIENT_ID || cfg.MS_TENANT_ID) && !(guid.test(cfg.MS_CLIENT_ID) && guid.test(cfg.MS_TENANT_ID))) { sys.cfgOk = false; sys.cfgMsg = 'Microsoft 365 連携の2つのIDは、xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx の形で、両方とも入れてください。'; render(); break; }
       const pw = $('#cfg-pw').value; if (pw) cfg.TEACHER_PW_HASH = await sha256('jukenko-teacher:' + pw);
@@ -1978,6 +2123,15 @@ document.addEventListener('click', async e => {
     case 'gh-recheck': STATE.teacher.gh = { st: 'checking' }; render(); await checkGh(); render(); break;
     case 'chk-preview': if (STATE.teacher.chk && STATE.teacher.chk.wb) { ingestWorkbook(STATE.teacher.chk.wb); STATE.preview = true; render(); toast('この端末だけ、チェックしたデータで表示しています'); } break;
     case 'ms-pull': await msPull(true); break;
+    case 'fb-pull': await fbPull(); break;
+    case 'fb-logout': fbLogout(); STATE.teacher.fb = null; STATE.teacher.fbAutoDone = false; render(); break;
+    case 'fb-rules-copy': { const ok = await copyText(fbRules(($('#fb-rule-email') || {}).value)); toast(ok ? 'ルールをコピーしました。Firebaseの「ルール」に貼り替えて「公開」を押してください' : 'コピーできませんでした'); break; }
+    case 'fb-clean': {
+      if (!fbAuth()) { toast('先に「生徒一覧」タブで先生用ログインをしてください'); break; }
+      if (!confirm(`${M.settings.year}年度以外の提出データを、Firebaseからすべて削除します。よろしいですか？`)) break;
+      try { const docs = await fbQuery('NOT_EQUAL', M.settings.year); const n = await fbDelete(docs.map(d => d.name)); toast(`${n}件削除しました`); } catch (ex) { toast(ex.message); }
+      break;
+    }
     case 'ms-forget': try { localStorage.removeItem(MS_FILE_KEY); } catch (ex) { } STATE.teacher.ms = null; render(); break;
     case 'lf-pick': await lfPick(); break;
     case 'lf-read': await lfRead(true); break;
@@ -2019,6 +2173,7 @@ function onInput(t, composing) {
   if (t.id === 'k-fq') { STATE.kyo.fq = t.value; clearTimeout(t._tm); t._tm = setTimeout(() => keepFocus('k-fq', rerenderTab), 250); return; }
   if (t.id === 'c-q') { STATE.cal.q = t.value; clearTimeout(t._tm); t._tm = setTimeout(() => keepFocus('c-q', rerenderTab), 250); return; }
   if (t.id === 't-q') { STATE.teacher.q = t.value; keepFocus('t-q', render); return; }
+  if (t.id === 'fb-rule-email') { const r = $('#fb-rules'); if (r) r.value = fbRules(t.value); return; }
   if (t.id === 'ai-template') { const a = loadAI(); a.template = t.value; saveAI(a); return; }
   if (!STATE.me) return;
   const pf = STATE.me.profile;
