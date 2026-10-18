@@ -1,5 +1,5 @@
 {
-  "SCHOOL": "",
+  "SCHOOL": "日本大学第一高等学校",
   "CLASSES": [
     "A",
     "B",
@@ -13,5 +13,5 @@
   "TEACHER_PW_HASH": "196bb376a8e3a2f97aea46dcb5ad0a593c16aaf136d48ff20e6da64f810253d5",
   "FB_API_KEY": "AIzaSyCOwV1CwjnIEPLTro5OeD2WBcKTk0s6Bz0",
   "FB_PROJECT_ID": "jukenko-planner",
-  "updated": "2026-10-18 21:37"
+  "updated": "2026-10-18 21:49"
 }
