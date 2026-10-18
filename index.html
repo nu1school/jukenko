@@ -27,7 +27,10 @@ window.CONFIG = {
   // 設定ファイルと公開先（教員ページの「システム設定」で保存すると data/config.json が上の値より優先されます）
   CONFIG_URL: 'data/config.json',
   GITHUB_REPO: 'nu1school/jukenko',
-  GITHUB_BRANCH: 'main'
+  GITHUB_BRANCH: 'main',
+  // Microsoft 365 連携（Formsの回答Excelを教員ページから直接読む）。システム設定で入れると config.json に保存されます
+  MS_CLIENT_ID: '',
+  MS_TENANT_ID: ''
 };
 </script>
 <style>
@@ -261,6 +264,8 @@ table.ex td.sj{font-size:12px;min-width:230px;max-width:340px;line-height:1.45}
 .subjchips{display:flex;flex-wrap:wrap;gap:6px}
 .fchip.sm{padding:3px 10px;font-size:12.5px}
 .fchip.strong{border-color:var(--ai);color:var(--ai);font-weight:700}
+.msbar{background:var(--sunken);border-radius:10px;padding:10px 12px}
+.mspick{margin-top:8px} .mslist{margin:6px 0 0;padding-left:1.2em;font-size:14px;line-height:1.9}
 .ghst{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;border-radius:10px;padding:10px 14px;font-size:14px;margin-bottom:8px}
 .ghst b{font-size:15px} .ghst span{font-size:13px;flex:1 1 260px}
 .ghst.ok{background:var(--c-ann-soft);color:var(--c-ann)} .ghst.ng{background:var(--warn-soft);color:var(--warn)}
@@ -418,8 +423,158 @@ async function ghPutFile(path, b64, message) {
   const who = { name: 'jukenko', email: 'jukenko@users.noreply.github.com' };
   return ghFetch(`/contents/${path}`, { method: 'PUT', body: JSON.stringify({ message, content: b64, sha, branch: C.GITHUB_BRANCH, author: who, committer: who }) });
 }
+/* ============================================================
+   Microsoft 365 連携：Formsの回答Excel（OneDrive/SharePoint）を教員ページから直接読む
+   ・サインインは学校のMicrosoftアカウント（PKCE、サーバー不要）
+   ・トークンはこのタブの間だけ保存（sessionStorage）。選んだExcelはこのブラウザに保存
+   ============================================================ */
+const MS_FILE_KEY = 'jukenko_planner_ms_file', MS_TOK_KEY = 'jukenko_planner_ms_token', MS_PKCE_KEY = 'jukenko_planner_ms_pkce';
+const MS_SCOPE = 'openid profile offline_access Files.Read.All';
+const msReady = () => !!(C.MS_CLIENT_ID && C.MS_TENANT_ID);
+const msRedirect = () => location.origin + location.pathname;
+const msAuthBase = () => `https://login.microsoftonline.com/${encodeURIComponent(C.MS_TENANT_ID)}/oauth2/v2.0`;
+function msFile() { try { return JSON.parse(localStorage.getItem(MS_FILE_KEY)) || null; } catch (e) { return null; } }
+function msTok() { try { return JSON.parse(sessionStorage.getItem(MS_TOK_KEY)) || null; } catch (e) { return null; } }
+function msSaveTok(j) {
+  const t = { at: j.access_token, rt: j.refresh_token || (msTok() || {}).rt || '', exp: Date.now() + ((j.expires_in || 3600) - 120) * 1000 };
+  try { sessionStorage.setItem(MS_TOK_KEY, JSON.stringify(t)); } catch (e) { }
+  return t;
+}
+function msRand(n) { const a = new Uint8Array(n); crypto.getRandomValues(a); return b64u(a); }
+async function msTokenReq(params) {
+  const res = await fetch(msAuthBase() + '/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(Object.assign({ client_id: C.MS_CLIENT_ID, scope: MS_SCOPE }, params)) });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(msErrText(j.error_description || j.error || ''));
+  return msSaveTok(j);
+}
+function msErrText(m) {
+  m = String(m || '');
+  if (/AADSTS65001|consent/i.test(m)) return 'このアプリの利用がまだ許可されていません。情報担当の先生に「管理者の同意」を依頼してください';
+  if (/AADSTS50011|redirect/i.test(m)) return 'アプリの登録のリダイレクトURIが、このページのURLと一致していません';
+  if (/AADSTS700016|AADSTS90002|not found/i.test(m)) return 'アプリのIDまたはテナントIDが正しくありません（システム設定を確認）';
+  if (/AADSTS9002326|Single-Page/i.test(m)) return 'アプリの登録で、リダイレクトURIの種類を「シングルページ アプリケーション」にしてください';
+  return 'サインインできませんでした：' + m.split(/\r?\n/)[0];
+}
+async function msSignIn() {
+  const verifier = msRand(48);
+  const challenge = b64u(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))));
+  const state = msRand(12);
+  try { sessionStorage.setItem(MS_PKCE_KEY, JSON.stringify({ verifier, state })); } catch (e) { }
+  const url = msAuthBase() + '/authorize?' + new URLSearchParams({ client_id: C.MS_CLIENT_ID, response_type: 'code', redirect_uri: msRedirect(), scope: MS_SCOPE, code_challenge: challenge, code_challenge_method: 'S256', state, response_mode: 'query', prompt: 'select_account' });
+  const w = window.open(url, 'jukenko_ms', 'width=520,height=680');
+  if (!w) { saveUI(); location.href = url; return new Promise(() => { }); } // ポップアップが使えない → 画面ごと移動して戻る
+  return new Promise((resolve, reject) => {
+    const on = async ev => {
+      if (ev.origin !== location.origin || !ev.data || ev.data.jkpAuth !== 1) return;
+      window.removeEventListener('message', on); clearInterval(tm);
+      try { resolve(await msFinish(ev.data.q)); } catch (e) { reject(e); }
+    };
+    window.addEventListener('message', on);
+    const tm = setInterval(() => { if (w.closed) { clearInterval(tm); setTimeout(() => { window.removeEventListener('message', on); reject(new Error('サインインの画面が閉じられました')); }, 800); } }, 700);
+  });
+}
+async function msFinish(q) {
+  const p = new URLSearchParams(q); let pk = {};
+  try { pk = JSON.parse(sessionStorage.getItem(MS_PKCE_KEY)) || {}; } catch (e) { }
+  if (p.get('error')) throw new Error(msErrText(p.get('error_description') || p.get('error')));
+  if (!p.get('code') || p.get('state') !== pk.state) throw new Error('サインインの確認に失敗しました。もう一度試してください');
+  try { sessionStorage.removeItem(MS_PKCE_KEY); } catch (e) { }
+  return msTokenReq({ grant_type: 'authorization_code', code: p.get('code'), redirect_uri: msRedirect(), code_verifier: pk.verifier });
+}
+/* サインイン画面から戻ってきたとき（起動の最初に呼ぶ）。true なら通常の起動はしない */
+function msHandleReturn() {
+  const q = location.search;
+  if (!/[?&](code|error)=/.test(q) || !/[?&]state=/.test(q)) return false;
+  if (window.opener && window.opener !== window) {
+    try { window.opener.postMessage({ jkpAuth: 1, q }, location.origin); } catch (e) { }
+    document.body.innerHTML = '<p style="padding:24px;font-family:sans-serif">サインインしました。この画面は閉じてかまいません。</p>';
+    setTimeout(() => window.close(), 300); return true;
+  }
+  history.replaceState(null, '', msRedirect()); STATE.msPending = q; return false;
+}
+async function msAccess(interactive) {
+  const t = msTok();
+  if (t && t.at && Date.now() < t.exp) return t.at;
+  if (t && t.rt) { try { return (await msTokenReq({ grant_type: 'refresh_token', refresh_token: t.rt })).at; } catch (e) { } }
+  if (!interactive) throw Object.assign(new Error('サインインが必要です'), { needLogin: true });
+  return (await msSignIn()).at;
+}
+async function graph(path, interactive) {
+  const at = await msAccess(interactive);
+  const res = await fetch('https://graph.microsoft.com/v1.0' + path, { headers: { Authorization: 'Bearer ' + at } });
+  if (res.status === 401) { try { sessionStorage.removeItem(MS_TOK_KEY); } catch (e) { } throw Object.assign(new Error('サインインの期限が切れました。もう一度サインインしてください'), { needLogin: true }); }
+  if (!res.ok) {
+    let m = ''; try { m = (await res.json()).error.message; } catch (e) { }
+    throw new Error(res.status === 403 ? 'このファイルを読む権限がありません（あなたに共有されているか確認してください）' : res.status === 404 ? 'ファイルが見つかりません（移動・削除されていないか、リンクが正しいか確認してください）' : `読み込めませんでした（${res.status}）${m}`);
+  }
+  return res.json();
+}
+function msSetFile(it) {
+  const r = it.remoteItem || it;
+  const f = { driveId: (r.parentReference || {}).driveId, id: r.id, name: r.name || it.name, webUrl: r.webUrl || it.webUrl || '' };
+  if (!f.driveId || !f.id) throw new Error('このファイルは選べませんでした');
+  try { localStorage.setItem(MS_FILE_KEY, JSON.stringify(f)); } catch (e) { }
+  return f;
+}
+async function msPickByLink(url) {
+  url = String(url || '').trim(); if (!/^https:\/\//.test(url)) throw new Error('https:// で始まるリンクを貼ってください');
+  const id = 'u!' + btoa(unescape(encodeURIComponent(url))).replace(/=+$/, '').replace(/\//g, '_').replace(/\+/g, '-');
+  const it = await graph(`/shares/${id}/driveItem`, true);
+  if (!/\.xlsx$/i.test(it.name || '')) throw new Error(`「${it.name}」はExcelファイルではありません`);
+  return msSetFile(it);
+}
+async function msRecent() {
+  const j = await graph('/me/drive/recent?$top=60', true);
+  return (j.value || []).filter(x => /\.xlsx$/i.test(x.name || '')).slice(0, 20);
+}
+function wbTexts(wb) { return wb.SheetNames.map(n => XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, defval: '' }).map(r => r.join('\t')).join('\n')); }
+async function msPull(interactive) {
+  const t = STATE.teacher; const f = msFile(); if (!f || !msReady()) return;
+  if (t.ms && t.ms.busy) return;
+  t.ms = Object.assign({}, t.ms, { busy: true, err: '' }); msPaint();
+  try {
+    const it = await graph(`/drives/${encodeURIComponent(f.driveId)}/items/${encodeURIComponent(f.id)}`, interactive);
+    const dl = it['@microsoft.graph.downloadUrl']; if (!dl) throw new Error('ファイルをダウンロードできませんでした');
+    const buf = await (await fetch(dl, { cache: 'no-store' })).arrayBuffer();
+    const r = await importTexts(wbTexts(XLSX.read(buf, { type: 'array' })), true);
+    t.ms = { at: new Date().toTimeString().slice(0, 5), summary: r, name: it.name };
+  } catch (e) { t.ms = { err: e.message, needLogin: !!e.needLogin }; }
+  if (STATE.view === 'teacher') render();
+}
+function msPaint() { const el = $('#msStatus'); if (el) el.innerHTML = msStatusHTML(); }
+function msStatusHTML() {
+  const m = STATE.teacher.ms || {};
+  if (m.busy) return '<span class="note">読み込んでいます…</span>';
+  if (m.err) return `<span class="w bad">${esc(m.err)}</span>${m.needLogin ? ' <button class="btn sm" data-act="ms-pull">サインインして読み込む</button>' : ''}`;
+  if (m.at) return `<span class="okmsg">${esc(m.at)} に読み込みました。</span><span class="note">${esc(m.summary || '')}　開いている間は5分ごとに自動で更新します。</span>`;
+  return '<span class="note">押すと、Formsの最新の回答を読み込みます（最初だけMicrosoftのサインインが出ます）。</span>';
+}
+function msPanelHTML() {
+  const t = STATE.teacher;
+  if (!msReady()) return '';
+  const f = msFile(); const pk = t.msPick;
+  const picker = (!f || pk) ? `<div class="mspick">
+      <p style="margin:0 0 6px;font-size:14px"><b>Formsの回答Excelを選んでください</b>（このパソコンで1回だけ）</p>
+      <div class="tools" style="margin:0"><input id="ms-link" class="inp" placeholder="回答Excelのリンクを貼る（OneDriveやSharePointで「リンクをコピー」したもの）" style="flex:1 1 280px"><button class="btn" data-act="ms-link">このExcelにする</button></div>
+      <div class="tools" style="margin:6px 0 0"><button class="btn ghost" data-act="ms-recent">最近開いたExcelから選ぶ</button>${f ? '<button class="btn ghost" data-act="ms-pickcancel">やめる</button>' : ''}</div>
+      ${pk && pk.list ? (pk.list.length ? `<ul class="mslist">${pk.list.map((x, i) => `<li><button class="linkbtn" data-msitem="${i}">${esc(x.name)}</button> <span class="note">${esc(((x.remoteItem || x).lastModifiedDateTime || '').slice(0, 10))}</span></li>`).join('')}</ul>` : '<p class="note">最近開いたExcelが見つかりませんでした。リンクを貼って選んでください。</p>') : ''}
+      ${pk && pk.err ? `<p class="w bad">${esc(pk.err)}</p>` : ''}
+      <p class="note">Formsの「回答」タブ →「Excelで開く」で開くExcelです。開いた画面の「共有」→「リンクをコピー」で取れます。</p></div>` : '';
+  return `<div class="msbar">${f ? `<div class="tools" style="margin:0"><button class="btn primary" data-act="ms-pull">Formsから最新を読み込む</button>
+      <span class="note">回答Excel：${f.webUrl ? `<a href="${esc(f.webUrl)}" target="_blank" rel="noopener">${esc(f.name)}</a>` : esc(f.name)}</span>${pk ? '' : '<button class="btn sm ghost" data-act="ms-pickopen">Excelを変える</button>'}</div>
+      <div id="msStatus" style="margin-top:6px">${msStatusHTML()}</div>` : ''}${picker}</div>`;
+}
+let msTimer = null;
+function msAuto() {
+  if (STATE.view !== 'teacher' || !isTeacherOk() || !msReady() || !msFile()) return;
+  const t = STATE.teacher;
+  if (!t.msAutoDone) { t.msAutoDone = true; const tk = msTok(); if (tk && (tk.rt || Date.now() < tk.exp)) msPull(false); }
+  if (!msTimer) msTimer = setInterval(() => {
+    if (STATE.view === 'teacher' && document.visibilityState === 'visible' && msFile() && msTok() && !(STATE.teacher.ms || {}).needLogin) msPull(false);
+  }, 5 * 60e3);
+}
 async function loadConfigFile() {
-  try { const r = await fetch(C.CONFIG_URL, { cache: 'no-cache' }); if (!r.ok) return; const j = await r.json(); ['SCHOOL', 'CLASSES', 'FORM_URL', 'TEACHER_PW_HASH'].forEach(k => { if (j[k] !== undefined && j[k] !== null) C[k] = j[k]; }); } catch (e) { }
+  try { const r = await fetch(C.CONFIG_URL, { cache: 'no-cache' }); if (!r.ok) return; const j = await r.json(); ['SCHOOL', 'CLASSES', 'FORM_URL', 'TEACHER_PW_HASH', 'MS_CLIENT_ID', 'MS_TENANT_ID'].forEach(k => { if (j[k] !== undefined && j[k] !== null) C[k] = j[k]; }); } catch (e) { }
 }
 const normName = s => String(s || '').replace(/[\s　]+/g, '');
 let toastTimer;
@@ -1280,37 +1435,41 @@ async function doTLogin(e) {
   STATE.view = 'teacher'; render();
 }
 function importPanelHTML() {
-  const t = STATE.teacher;
-  return `<section class="panel" style="margin-bottom:14px"><h3>提出データを読み込む</h3>
-    <p style="margin:0 0 8px;font-size:14px">Formsの回答Excel（.xlsx）や、コードを貼ったメール・Classroomの画面をまとめてコピーしたものを入れてください。中から JKP… のコードだけを拾います。同じ生徒が何回出していても、いちばん新しいものを使います。</p>
+  const t = STATE.teacher; const auto = msReady() && msFile();
+  const manual = `<p style="margin:0 0 8px;font-size:14px">Formsの回答Excel（.xlsx）や、コードを貼ったメール・Classroomの画面をまとめてコピーしたものを入れてください。中から JKP… のコードだけを拾います。同じ生徒が何回出していても、いちばん新しいものを使います。</p>
     <div class="tools"><input type="file" id="imp-files" accept=".xlsx,.xls,.csv,.txt" multiple class="inp" style="width:auto;flex:1 1 220px"></div>
     <textarea id="imp-text" class="inp" rows="3" placeholder="ここに貼り付け（何人分でも、前後に文章が混ざっていてもOK）"></textarea>
-    <div class="tools" style="margin:8px 0 0"><button class="btn primary" data-act="imp-go">貼り付けた内容を読み込む</button><button class="btn ghost" data-act="imp-clear">読み込んだデータを消す</button><span class="note">${t.students.length}人分を表示中。データはこの画面にだけあり、閉じると消えます。</span></div>
-    ${t.imp ? `<p class="notice info" style="margin-bottom:0">${esc(t.imp)}</p>` : ''}</section>`;
+    <div class="tools" style="margin:8px 0 0"><button class="btn primary" data-act="imp-go">貼り付けた内容を読み込む</button></div>`;
+  return `<section class="panel" style="margin-bottom:14px"><h3>提出データを読み込む</h3>
+    ${msPanelHTML()}
+    ${auto ? `<details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px">ファイルや貼り付けで読み込む（手動）</summary><div style="margin-top:8px">${manual}</div></details>` : manual}
+    <div class="tools" style="margin:8px 0 0"><button class="btn ghost" data-act="imp-clear">読み込んだデータを消す</button><span class="note">${t.students.length}人分を表示中。データはこの画面にだけあり、閉じると消えます。</span></div>
+    ${t.imp && !(auto && t.ms && t.ms.at) ? `<p class="notice info" style="margin-bottom:0">${esc(t.imp)}</p>` : ''}
+    ${!msReady() ? '<p class="note" style="margin-bottom:0">システム設定で「Microsoft 365 連携」を設定すると、Formsの回答をボタン1つで自動で読み込めます。</p>' : ''}</section>`;
 }
-async function importTexts(texts) {
+async function importTexts(texts, quiet) {
   const t = STATE.teacher; const codes = new Set();
   texts.forEach(x => (String(x).match(CODE_RE) || []).forEach(c => codes.add(c)));
   const map = new Map(t.students.map(s => [s.cls + '#' + s.no, s]));
-  let ok = 0, bad = 0, older = 0;
+  let ok = 0, bad = 0, older = 0, oldYear = 0;
   for (const c of codes) {
     try {
       const s = await decodeCode(c); ok++;
+      if (s.year && M.settings.year && String(s.year) !== String(M.settings.year)) { oldYear++; continue; }
       const key = s.cls + '#' + s.no; const cur = map.get(key);
       if (!cur || String(s.updated) >= String(cur.updated)) { if (cur) older++; map.set(key, s); } else older++;
     } catch (e) { bad++; }
   }
   t.students = [...map.values()];
-  t.imp = codes.size ? `コード${codes.size}件を読み取り、${t.students.length}人分を表示しています。${older ? `同じ生徒の古いコード${older}件は新しいもので置き換えました。` : ''}${bad ? `読めなかったコード${bad}件（途中で切れている可能性があります）。` : ''}` : 'コード（JKP… で始まる文字）が見つかりませんでした。';
+  t.imp = codes.size ? `コード${codes.size}件を読み取り、${t.students.length}人分を表示しています。${older ? `同じ生徒の古いコード${older}件は新しいもので置き換えました。` : ''}${oldYear ? `ほかの年度のコード${oldYear}件は除きました。` : ''}${bad ? `読めなかったコード${bad}件（途中で切れている可能性があります）。` : ''}` : 'コード（JKP… で始まる文字）が見つかりませんでした。';
+  if (quiet) return `提出${codes.size - oldYear}件・${t.students.length}人分。${bad ? `読めなかったコード${bad}件。` : ''}`;
   render();
 }
 async function importFiles(files) {
   const texts = [];
   for (const f of files) {
-    if (/\.(xlsx|xls)$/i.test(f.name)) {
-      const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });
-      wb.SheetNames.forEach(n => texts.push(XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, defval: '' }).map(r => r.join('\t')).join('\n')));
-    } else texts.push(await f.text());
+    if (/\.(xlsx|xls)$/i.test(f.name)) texts.push(...wbTexts(XLSX.read(await f.arrayBuffer(), { type: 'array' })));
+    else texts.push(await f.text());
   }
   importTexts(texts);
 }
@@ -1454,6 +1613,18 @@ function tDataHTML() {
           <li>「…」→「事前入力済みリンクを取得」で、組に <b>CLASS</b>、番号に <b>NO</b>、氏名に <b>NAME</b>、提出コードに <b>CODE</b> と入れてリンクを作る</li>
           <li>できたリンクを上の欄に貼る。年度が変わっても、回答を削除すれば同じフォームを使い続けられます</li>
         </ol></details>
+      <div class="field"><label>Microsoft 365 連携（Formsの回答を自動で読み込む・任意）</label>
+        <div class="row2"><input id="cfg-msc" class="inp num" placeholder="アプリケーション（クライアント）ID" value="${esc(C.MS_CLIENT_ID || '')}"><input id="cfg-mst" class="inp num" placeholder="ディレクトリ（テナント）ID" value="${esc(C.MS_TENANT_ID || '')}"></div></div>
+      <details style="font-size:13px;margin-bottom:10px"><summary style="cursor:pointer">2つのIDの取り方（学校で最初に1回だけ）</summary>
+        <ol style="padding-left:1.3em;line-height:1.8;margin:6px 0">
+          <li>学校のMicrosoftアカウントで <b>https://entra.microsoft.com</b> を開く</li>
+          <li>「アプリケーション」→「アプリの登録」→「新規登録」。名前は「受験校プランナー」、アカウントの種類は「この組織ディレクトリのみ」</li>
+          <li>リダイレクトURIは、種類を「<b>シングルページ アプリケーション（SPA）</b>」にして <b>${esc(msRedirect())}</b></li>
+          <li>「登録」を押し、概要に出る「アプリケーション（クライアント）ID」と「ディレクトリ（テナント）ID」を上の2つの欄に貼る</li>
+          <li>「APIのアクセス許可」→「アクセス許可の追加」→「Microsoft Graph」→「委任されたアクセス許可」で <b>Files.Read.All</b> を追加</li>
+          <li>「設定を保存して公開」を押す。そのあと「生徒一覧」タブで回答Excelを選ぶ（パソコンごとに1回）</li>
+        </ol>
+        <p style="margin:4px 0 0">「アプリの登録」に入れない、またはサインイン時に「管理者の承認が必要」と出る場合は、情報担当の先生に上の手順（と「管理者の同意を与える」）を依頼してください。この登録は学校に属するので、担当が変わっても消えません。</p></details>
       <div class="field"><label for="cfg-pw">教員パスワードを変える（変えないときは空欄）</label><input id="cfg-pw" class="inp" type="password" autocomplete="new-password"></div>
       <div class="tools"><button class="btn primary" data-act="cfg-save"${tok ? '' : ' disabled'}>設定を保存して公開</button>${tok ? '' : '<span class="note">このパソコンから公開できる状態になると押せます（上の表示を確認）。</span>'}</div>
       ${sys.cfgMsg ? `<p class="notice ${sys.cfgOk ? 'info' : ''}">${esc(sys.cfgMsg)}</p>` : ''}
@@ -1644,7 +1815,7 @@ async function convertKeinet(files) {
    イベント
    ============================================================ */
 function afterRender() {
-  renderSave();
+  renderSave(); msAuto();
   const lf = $('#loginForm'); if (lf) lf.addEventListener('submit', doLogin);
   const tf = $('#tForm'); if (tf) tf.addEventListener('submit', doTLogin);
   $$('details.fac').forEach(d => d.addEventListener('toggle', () => {
@@ -1693,6 +1864,7 @@ document.addEventListener('click', async e => {
   if (d.ttab) { STATE.teacher.tab = d.ttab; render(); return; }
   if (d.sel) { STATE.teacher.sel[t.checked ? 'add' : 'delete'](d.sel); const b = $('[data-act="tprint"]'); if (b) b.textContent = `選んだ生徒の受験校一覧PDF・1人1枚（${STATE.teacher.sel.size}人）`; return; }
   if (d.detail) { STATE.teacher.detail = d.detail; render(); return; }
+  if (d.msitem !== undefined) { const pk = STATE.teacher.msPick || {}; const it = (pk.list || [])[+d.msitem]; if (it) { try { msSetFile(it); STATE.teacher.msPick = null; STATE.teacher.ms = null; render(); await msPull(true); } catch (ex) { pk.err = ex.message; render(); } } return; }
   const act = d.act; if (!act) return;
   const pickEl = t.closest('.pick'); const pi = pickEl ? +pickEl.dataset.i : -1;
   switch (act) {
@@ -1731,7 +1903,9 @@ document.addEventListener('click', async e => {
     }
     case 'cfg-save': {
       const sys = STATE.teacher.sys = STATE.teacher.sys || {};
-      const cfg = { SCHOOL: $('#cfg-school').value.trim(), CLASSES: $('#cfg-classes').value.split(/[,、，\s]+/).map(x => x.trim()).filter(Boolean), FORM_URL: $('#cfg-form').value.trim(), TEACHER_PW_HASH: C.TEACHER_PW_HASH, updated: nowStr() };
+      const cfg = { SCHOOL: $('#cfg-school').value.trim(), CLASSES: $('#cfg-classes').value.split(/[,、，\s]+/).map(x => x.trim()).filter(Boolean), FORM_URL: $('#cfg-form').value.trim(), TEACHER_PW_HASH: C.TEACHER_PW_HASH, MS_CLIENT_ID: $('#cfg-msc').value.trim(), MS_TENANT_ID: $('#cfg-mst').value.trim(), updated: nowStr() };
+      const guid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if ((cfg.MS_CLIENT_ID || cfg.MS_TENANT_ID) && !(guid.test(cfg.MS_CLIENT_ID) && guid.test(cfg.MS_TENANT_ID))) { sys.cfgOk = false; sys.cfgMsg = 'Microsoft 365 連携の2つのIDは、xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx の形で、両方とも入れてください。'; render(); break; }
       const pw = $('#cfg-pw').value; if (pw) cfg.TEACHER_PW_HASH = await sha256('jukenko-teacher:' + pw);
       if (cfg.FORM_URL && !/CODE/.test(cfg.FORM_URL)) { sys.cfgOk = false; sys.cfgMsg = 'FormsのリンクにCODEが入っていません。提出コードの欄に CODE と入れて事前入力リンクを作り直してください。'; render(); break; }
       try {
@@ -1751,6 +1925,11 @@ document.addEventListener('click', async e => {
     case 'gh-clear': { try { localStorage.removeItem(GH_KEY); localStorage.removeItem(GH_DATE_KEY); } catch (ex) { } STATE.teacher.sys = {}; STATE.teacher.gh = { st: 'none' }; render(); toast('合鍵の登録を消しました'); break; }
     case 'gh-recheck': STATE.teacher.gh = { st: 'checking' }; render(); await checkGh(); render(); break;
     case 'chk-preview': if (STATE.teacher.chk && STATE.teacher.chk.wb) { ingestWorkbook(STATE.teacher.chk.wb); STATE.preview = true; render(); toast('この端末だけ、チェックしたデータで表示しています'); } break;
+    case 'ms-pull': await msPull(true); break;
+    case 'ms-pickopen': STATE.teacher.msPick = {}; render(); break;
+    case 'ms-pickcancel': STATE.teacher.msPick = null; render(); break;
+    case 'ms-link': { const pk = STATE.teacher.msPick = STATE.teacher.msPick || {}; try { await msPickByLink(($('#ms-link') || {}).value); STATE.teacher.msPick = null; STATE.teacher.ms = null; render(); await msPull(true); } catch (ex) { pk.err = ex.message; render(); } break; }
+    case 'ms-recent': { const pk = STATE.teacher.msPick = STATE.teacher.msPick || {}; pk.err = ''; try { pk.list = await msRecent(); } catch (ex) { pk.err = ex.message; } render(); break; }
     case 'imp-go': importTexts([($('#imp-text') || {}).value || '']); break;
     case 'imp-clear': try { sessionStorage.removeItem(T_KEY); } catch (ex) { } STATE.teacher.students = []; STATE.teacher.sel = new Set(); STATE.teacher.imp = ''; render(); break;
     case 'del': if (pi >= 0) { STATE.me.picks.splice(pi, 1); touch(); rerenderTab(); refreshCounts(); } break;
@@ -1823,9 +2002,13 @@ window.addEventListener('resize', () => { const n = isNarrow(); if (lastNarrow !
    ============================================================ */
 (async function boot() {
   const app = $('#app');
+  if (msHandleReturn()) return;
   if (typeof XLSX === 'undefined') { app.innerHTML = `<div class="login"><h1>受験校プランナー</h1><p class="err-msg">表計算ライブラリを読み込めませんでした。インターネットに接続して再読み込みしてください。</p></div>`; return; }
   await loadConfigFile();
-  try { await loadMaster(); if (!restoreUI()) render(); }
+  try {
+    await loadMaster(); if (!restoreUI()) render();
+    if (STATE.msPending) { const q = STATE.msPending; STATE.msPending = null; if (STATE.view === 'teacher' && isTeacherOk()) { try { await msFinish(q); STATE.teacher.msAutoDone = true; await msPull(false); } catch (e) { STATE.teacher.ms = { err: e.message }; render(); } } }
+  }
   catch (e) {
     app.innerHTML = `<div class="login"><h1>受験校プランナー</h1><p class="err-msg">大学データ（${esc(C.MASTER_URL)}）を読み込めませんでした。</p>
       <p class="note">パソコンでファイルを直接開いている場合は、下から master.xlsx を選ぶと動作を確認できます。GitHub Pagesに置いた場合は data フォルダに master.xlsx があるか確認してください。</p>
