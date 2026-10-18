@@ -10,9 +10,8 @@
     "G",
     "H"
   ],
-  "FORM_URL": "https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=GHfprcz9AEmVhDXsMMWmrPM0b5nG_XhMtPy8dELv799UQkFVUUE2Nk1YVEhZTDJYUThPWU5KUjM3TS4u&r40bc3edd84164de48ecdd88c22738bd6=CLASS&r41302d5b42454dff869349e9cf58a821=NO&r74e50b72ed5f4c50bec16c8ed131ff9c=NAME&r9bfaf319ed6a43d996dcb1ed8d7c5439=CODE",
   "TEACHER_PW_HASH": "196bb376a8e3a2f97aea46dcb5ad0a593c16aaf136d48ff20e6da64f810253d5",
-  "MS_CLIENT_ID": "a9298167-9ca4-4f2c-873d-41c0ffa48463",
-  "MS_TENANT_ID": "ade97718-fdcc-4900-9584-35ec30c5a6ac",
-  "updated": "2026-10-18 20:49"
+  "FB_API_KEY": "AIzaSyCOwV1CwjnIEPLTro5OeD2WBcKTk0s6Bz0",
+  "FB_PROJECT_ID": "jukenko-planner",
+  "updated": "2026-10-18 21:37"
 }
