@@ -426,73 +426,148 @@ async function ghPutFile(path, b64, message) {
   return ghFetch(`/contents/${path}`, { method: 'PUT', body: JSON.stringify({ message, content: b64, sha, branch: C.GITHUB_BRANCH, author: who, committer: who }) });
 }
 /* ============================================================
-   Firebase（Google）：生徒はボタン1つで提出、先生は開くだけで最新を受け取る
-   ・生徒は「新しく提出する」ことだけできる。読む・消すは先生用ログインのみ（Firestoreのルールで制限）
+   Firebase（Google）
+   ・生徒：組・番号・氏名・パスワードでログイン。入力はサーバーにも自動で保存し、どの端末からでも続きから使える
+   ・本人のデータを読めるのは本人と先生だけ。先生は全員分を見る・直す・削除できる（Firestoreのルールで制限）
    ============================================================ */
 const fbReady = () => !!(C.FB_API_KEY && C.FB_PROJECT_ID);
-const FB_AUTH_KEY = 'jukenko_planner_fb_auth';
+const FB_AUTH_KEY = 'jukenko_planner_fb_auth', STU_AUTH_KEY = 'jukenko_planner_stu_auth';
+const STU_DOMAIN = 'students.example.com';
 const fbDocs = () => `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(C.FB_PROJECT_ID)}/databases/(default)/documents`;
-async function fbSubmit(me, code) {
-  const body = { fields: { y: { stringValue: String(M.settings.year || '') }, c: { stringValue: String(me.cls) }, n: { stringValue: String(me.no) }, code: { stringValue: code }, t: { stringValue: new Date().toISOString() } } };
-  const r = await fetch(`${fbDocs()}/subs?key=${encodeURIComponent(C.FB_API_KEY)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  if (!r.ok) { let m = ''; try { m = (await r.json()).error.message; } catch (e) { } throw new Error(`提出できませんでした（${r.status}）${m ? '：' + m : ''}`); }
+function sidOf(year, cls, no) {
+  const hex = [...new TextEncoder().encode(String(cls).trim())].map(b => b.toString(16).padStart(2, '0')).join('');
+  return `y${year}-${hex}-${String(no).trim()}`.toLowerCase();
 }
-function fbAuth() { try { return JSON.parse(localStorage.getItem(FB_AUTH_KEY) || sessionStorage.getItem(FB_AUTH_KEY)) || null; } catch (e) { return null; } }
-function fbSaveAuth(a) { try { (a.remember ? localStorage : sessionStorage).setItem(FB_AUTH_KEY, JSON.stringify(a)); } catch (e) { } }
-function fbLogout() { try { localStorage.removeItem(FB_AUTH_KEY); sessionStorage.removeItem(FB_AUTH_KEY); } catch (e) { } }
-async function fbSignIn(email, pw, remember) {
-  const r = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${encodeURIComponent(C.FB_API_KEY)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password: pw, returnSecureToken: true }) });
+const stuEmail = sid => `${sid}@${STU_DOMAIN}`;
+async function idt(path, body) {
+  let r;
+  try { r = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:${path}?key=${encodeURIComponent(C.FB_API_KEY)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); }
+  catch (e) { throw Object.assign(new Error('インターネットにつながっていないか、サーバーに接続できません'), { code: 'NETWORK' }); }
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) {
-    const m = (j.error && j.error.message) || '';
-    throw new Error(/INVALID|PASSWORD|EMAIL_NOT_FOUND|USER_DISABLED/.test(m) ? 'メールアドレスかパスワードが違います' : /TOO_MANY/.test(m) ? '失敗が続いたので、しばらく待ってから試してください' : /OPERATION_NOT_ALLOWED|CONFIGURATION_NOT_FOUND/.test(m) ? 'Firebaseで「メール/パスワード」のログインが有効になっていません' : /API_KEY|API key/.test(m) ? 'システム設定の apiKey が正しくありません' : 'ログインできませんでした：' + m);
-  }
-  const a = { email, idToken: j.idToken, refresh: j.refreshToken, exp: Date.now() + (+j.expiresIn - 120) * 1000, remember: !!remember };
-  fbLogout(); fbSaveAuth(a); return a;
+  if (!r.ok) { const code = ((j.error && j.error.message) || String(r.status)).split(' ')[0]; throw Object.assign(new Error(code), { code }); }
+  return j;
 }
-async function fbToken() {
-  const a = fbAuth(); if (!a) throw Object.assign(new Error('ログインしてください'), { needLogin: true });
+function idtMsg(e, who) {
+  const c = e.code || e.message || '';
+  if (/EMAIL_EXISTS/.test(c)) return who === 'move' ? 'その組・番号はすでに使われています' : 'この組・番号はすでに登録されています。「ログイン」から入ってください（パスワードを忘れたときは担任の先生へ）';
+  if (/INVALID_LOGIN_CREDENTIALS|INVALID_PASSWORD|EMAIL_NOT_FOUND|USER_DISABLED/.test(c)) return who === 'teacher' ? 'メールアドレスかパスワードが違います' : '組・番号・パスワードのどれかが違います。はじめての人は「はじめて使う」から登録してください';
+  if (/WEAK_PASSWORD/.test(c)) return 'パスワードは6文字以上にしてください';
+  if (/TOO_MANY/.test(c)) return '失敗が続いたので、しばらく待ってから試してください';
+  if (/OPERATION_NOT_ALLOWED|CONFIGURATION_NOT_FOUND|ADMIN_ONLY/.test(c)) return 'Firebaseで「メール / パスワード」のログイン（と新規登録）が有効になっていません';
+  if (/API_KEY|API key/.test(c)) return 'システム設定の apiKey が正しくありません';
+  if (c === 'NETWORK') return e.message;
+  return 'うまくいきませんでした：' + c;
+}
+function readAuth(k) { try { return JSON.parse(localStorage.getItem(k) || sessionStorage.getItem(k)) || null; } catch (e) { return null; } }
+function writeAuth(k, a, persist) { try { (persist ? localStorage : sessionStorage).setItem(k, JSON.stringify(a)); } catch (e) { } }
+function clearAuth(k) { try { localStorage.removeItem(k); sessionStorage.removeItem(k); } catch (e) { } }
+const authFrom = (j, extra) => Object.assign({ idToken: j.idToken, refresh: j.refreshToken, exp: Date.now() + (+j.expiresIn - 120) * 1000 }, extra);
+async function tokenOf(k) {
+  const a = readAuth(k); if (!a) throw Object.assign(new Error('ログインしてください'), { needLogin: true });
   if (Date.now() < a.exp) return a.idToken;
   const r = await fetch(`https://securetoken.googleapis.com/v1/token?key=${encodeURIComponent(C.FB_API_KEY)}`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: a.refresh }) });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) { fbLogout(); throw Object.assign(new Error('ログインの期限が切れました。もう一度ログインしてください'), { needLogin: true }); }
-  Object.assign(a, { idToken: j.id_token, refresh: j.refresh_token, exp: Date.now() + (+j.expires_in - 120) * 1000 }); fbSaveAuth(a);
-  return a.idToken;
+  if (!r.ok) { if (r.status === 400) clearAuth(k); throw Object.assign(new Error('ログインの期限が切れました。もう一度ログインしてください'), { needLogin: r.status === 400 }); }
+  Object.assign(a, { idToken: j.id_token, refresh: j.refresh_token, exp: Date.now() + (+j.expires_in - 120) * 1000 });
+  writeAuth(k, a, !!localStorage.getItem(k)); return a.idToken;
 }
-async function fbQuery(op, year) {
-  const tok = await fbToken();
-  const sq = { structuredQuery: { from: [{ collectionId: 'subs' }], where: { fieldFilter: { field: { fieldPath: 'y' }, op, value: { stringValue: String(year) } } } } };
-  const r = await fetch(`${fbDocs()}:runQuery`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok }, body: JSON.stringify(sq) });
-  if (r.status === 401) { fbLogout(); throw Object.assign(new Error('ログインし直してください'), { needLogin: true }); }
-  if (r.status === 403) {
+/* Firestore（REST） */
+const toFields = o => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, { stringValue: String(v ?? '') }]));
+const fromDoc = d => { const f = d.fields || {}; const o = { _id: d.name.split('/').pop(), _name: d.name }; for (const k in f) o[k] = f[k].stringValue ?? ''; return o; };
+async function fsReq(method, path, tok, body, mask) {
+  const q = mask ? '?' + mask.map(m => 'updateMask.fieldPaths=' + encodeURIComponent(m)).join('&') : '';
+  let r;
+  try { r = await fetch(`${fbDocs()}/${path}${q}`, { method, headers: Object.assign({ Authorization: 'Bearer ' + tok }, body ? { 'Content-Type': 'application/json' } : {}), body: body ? JSON.stringify(body) : undefined }); }
+  catch (e) { throw new Error('インターネットにつながっていないか、サーバーに接続できません'); }
+  if (r.status === 404 && method === 'GET') return null;
+  if (!r.ok) {
     let m = ''; try { m = JSON.stringify(await r.json()); } catch (e) { }
-    if (/has not been used|is disabled|SERVICE_DISABLED/i.test(m)) throw new Error('Firestoreのデータベースがまだ作られていません。Firebaseの「Firestore Database」で「データベースを作成」してください');
-    throw new Error('読む権限がありません。Firebaseの「Firestore Database」→「ルール」に、このログインのメールアドレスが入っているか確認してください');
+    if (r.status === 401) throw Object.assign(new Error('ログインし直してください'), { needLogin: true });
+    if (/has not been used|SERVICE_DISABLED/i.test(m)) throw new Error('Firestoreのデータベースがまだ作られていません');
+    if (r.status === 403) throw new Error('権限がありません（Firebaseの「ルール」を、システム設定で作った最新のものに貼り替えたか確認してください）');
+    throw new Error(`通信できませんでした（${r.status}）`);
   }
-  if (r.status === 404) throw new Error('Firestoreのデータベースが見つかりません（projectId と、データベースを作成したかを確認）');
-  if (!r.ok) throw new Error(`読み込めませんでした（${r.status}）`);
-  const arr = await r.json();
-  return arr.filter(x => x.document).map(x => { const f = x.document.fields || {}; const g = k => (f[k] && f[k].stringValue) || ''; return { name: x.document.name, y: g('y'), c: g('c'), n: g('n'), code: g('code'), t: g('t') }; });
+  return method === 'DELETE' ? true : r.json();
 }
-async function fbDelete(names) {
-  const tok = await fbToken(); let n = 0;
-  for (const nm of names) { const r = await fetch(`https://firestore.googleapis.com/v1/${nm}`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + tok } }); if (r.ok) n++; }
-  return n;
+async function fsQueryYear(tok, op, year) {
+  let r;
+  try { r = await fetch(`${fbDocs()}:runQuery`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok }, body: JSON.stringify({ structuredQuery: { from: [{ collectionId: 'students' }], where: { fieldFilter: { field: { fieldPath: 'y' }, op, value: { stringValue: String(year) } } } } }) }); }
+  catch (e) { throw new Error('インターネットにつながっていないか、サーバーに接続できません'); }
+  if (!r.ok) {
+    let m = ''; try { m = JSON.stringify(await r.json()); } catch (e) { }
+    if (r.status === 401) throw Object.assign(new Error('ログインし直してください'), { needLogin: true });
+    if (/has not been used|SERVICE_DISABLED/i.test(m)) throw new Error('Firestoreのデータベースがまだ作られていません。Firebaseの「Firestore Database」で「データベースを作成」してください');
+    if (r.status === 403) throw new Error('読む権限がありません。Firebaseの「Firestore Database」→「ルール」を、システム設定で作った最新のルールに貼り替えてください（メールアドレスも確認）');
+    if (r.status === 404) throw new Error('Firestoreのデータベースが見つかりません（projectId と、データベースを作成したかを確認）');
+    throw new Error(`読み込めませんでした（${r.status}）`);
+  }
+  return (await r.json()).filter(x => x.document).map(x => fromDoc(x.document));
+}
+
+/* ---------- 生徒 ---------- */
+function stuAuthFor(me) { const a = readAuth(STU_AUTH_KEY); return a && me && a.sid === sidOf(M.settings.year, me.cls, me.no) ? a : null; }
+async function stuRegister(cls, no, pw) {
+  const sid = sidOf(M.settings.year, cls, no);
+  const j = await idt('signUp', { email: stuEmail(sid), password: pw, returnSecureToken: true });
+  writeAuth(STU_AUTH_KEY, authFrom(j, { sid }), true); return sid;
+}
+async function stuSignIn(cls, no, pw) {
+  const sid = sidOf(M.settings.year, cls, no);
+  const j = await idt('signInWithPassword', { email: stuEmail(sid), password: pw, returnSecureToken: true });
+  writeAuth(STU_AUTH_KEY, authFrom(j, { sid }), true); return sid;
+}
+let stuTimer = null;
+function stuQueueSave() {
+  if (!fbReady() || !STATE.me || !stuAuthFor(STATE.me)) return;
+  clearTimeout(stuTimer); STATE.srv = 'saving'; renderSave(); stuTimer = setTimeout(() => stuSave().catch(() => { }), 1500);
+}
+async function stuSave(extra) {
+  const me = STATE.me; const a = stuAuthFor(me); if (!a) throw new Error('ログインし直してください');
+  clearTimeout(stuTimer);
+  try {
+    const tok = await tokenOf(STU_AUTH_KEY); const t = new Date().toISOString();
+    const f = Object.assign({ y: M.settings.year, c: me.cls, n: me.no, name: me.name, code: await encodeCode(me), t, by: 'student' }, extra || {});
+    await fsReq('PATCH', `students/${a.sid}`, tok, { fields: toFields(f) }, Object.keys(f));
+    me.serverT = t; storeMe(); STATE.srv = 'ok'; renderSave();
+  } catch (e) { STATE.srv = 'err'; STATE.srvErr = e.message; renderSave(); throw e; }
+}
+async function stuSync() {
+  const me = STATE.me; if (!fbReady() || !me) return; const a = stuAuthFor(me); if (!a) return;
+  try {
+    const tok = await tokenOf(STU_AUTH_KEY);
+    const d = await fsReq('GET', `students/${a.sid}`, tok); if (!d || STATE.me !== me) return;
+    const o = fromDoc(d);
+    if (o.t && o.t > (me.serverT || '')) {
+      const s = await decodeCode(o.code);
+      Object.assign(me, { name: s.name || me.name, profile: s.profile, picks: s.picks, updated: s.updated, serverT: o.t, submittedAt: o.sub || '' });
+      if (o.by === 'teacher') me.backMsg = `先生が受験校などを変更しました（${o.t.slice(5, 10).replace('-', '/')}）。内容を確認してください。`;
+      storeMe(); render(); if (o.by === 'teacher') toast(me.backMsg);
+    }
+  } catch (e) { }
+}
+
+/* ---------- 先生 ---------- */
+const fbAuth = () => readAuth(FB_AUTH_KEY);
+const fbLogout = () => clearAuth(FB_AUTH_KEY);
+async function fbSignIn(email, pw, remember) {
+  let j; try { j = await idt('signInWithPassword', { email, password: pw, returnSecureToken: true }); } catch (e) { throw new Error(idtMsg(e, 'teacher')); }
+  const a = authFrom(j, { email }); fbLogout(); writeAuth(FB_AUTH_KEY, a, remember); return a;
 }
 async function fbPull() {
   const t = STATE.teacher; if (!fbReady() || !fbAuth()) return;
   if (t.fb && t.fb.busy) return;
   t.fb = Object.assign({}, t.fb, { busy: true, err: '' }); const el = $('#fbStatus'); if (el) el.innerHTML = fbStatusHTML();
   try {
-    const docs = await fbQuery('EQUAL', M.settings.year);
-    t.students = [];                                   // Firebaseの内容をそのまま表示（ほかの先生が削除した生徒も消える）
-    const r = await importTexts(docs.map(d => d.code), true);
-    // 同じ生徒の古い提出は片付ける（最新だけ残す）
-    const latest = {}; docs.forEach(d => { const k = d.c + '#' + d.n; if (!latest[k] || d.t > latest[k].t) latest[k] = d; });
-    const old = docs.filter(d => latest[d.c + '#' + d.n] !== d).slice(0, 40).map(d => d.name);
-    if (old.length) fbDelete(old).catch(() => { });
-    t.fb = { at: new Date().toTimeString().slice(0, 5), summary: r };
-  } catch (e) { t.fb = { err: e.message, needLogin: !!e.needLogin }; }
+    const docs = await fsQueryYear(await tokenOf(FB_AUTH_KEY), 'EQUAL', M.settings.year);
+    const list = []; let bad = 0;
+    for (const d of docs) {
+      try { const s = await decodeCode(d.code); Object.assign(s, { name: d.name || s.name, sid: d._id, pw: d.pw || '', submittedAt: d.sub || '', by: d.by, srvT: d.t }); list.push(s); }
+      catch (e) { list.push({ cls: d.c, no: d.n, name: d.name, profile: {}, picks: [], sid: d._id, pw: d.pw || '', updated: '', srvT: d.t, broken: true }); bad++; }
+    }
+    t.students = list;
+    const nSub = list.filter(s => s.submittedAt).length;
+    t.fb = { at: new Date().toTimeString().slice(0, 5), summary: `${list.length}人（提出済み${nSub}人）${bad ? `。読めないデータ${bad}件` : ''}` };
+  } catch (e) { t.fb = { err: e.message }; if (e.needLogin) fbLogout(); }
   if (STATE.view === 'teacher') render();
 }
 let fbTimer = null;
@@ -500,110 +575,110 @@ function fbAuto() {
   if (STATE.view !== 'teacher' || !isTeacherOk() || !fbReady()) return;
   const t = STATE.teacher;
   if (!t.fbAutoDone && fbAuth()) { t.fbAutoDone = true; fbPull(); }
-  if (!fbTimer) fbTimer = setInterval(() => { if (STATE.view === 'teacher' && document.visibilityState === 'visible' && fbAuth() && !(STATE.teacher.fb || {}).err) fbPull(); }, 2 * 60e3);
+  if (!fbTimer) fbTimer = setInterval(() => { if (STATE.view === 'teacher' && document.visibilityState === 'visible' && fbAuth() && !(STATE.teacher.fb || {}).err && !STATE.teacher.saving) fbPull(); }, 2 * 60e3);
 }
 function fbStatusHTML() {
   const f = STATE.teacher.fb || {};
-  if (f.busy) return '<span class="note">受け取っています…</span>';
+  if (f.busy) return '<span class="note">読み込んでいます…</span>';
   if (f.err) return `<span class="w bad">${esc(f.err)}</span>`;
-  if (f.at) return `<span class="okmsg">${esc(f.at)} に受け取りました。</span><span class="note">${esc(f.summary || '')}　開いている間は2分ごとに自動で受け取ります。</span>`;
+  if (f.at) return `<span class="okmsg">${esc(f.at)} に読み込みました。</span><span class="note">${esc(f.summary || '')}　開いている間は2分ごとに自動で更新します。</span>`;
   return '';
 }
-function fbRules(email) {
-  const e = String(email || '').trim().toLowerCase() || '先生用ログインのメールアドレス';
-  return `rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /subs/{id} {
-      // 生徒：新しく提出することだけできる（読む・消す・書き換えるはできない）
-      allow create: if request.resource.data.keys().hasOnly(['y', 'c', 'n', 'code', 't'])
-        && request.resource.data.code is string && request.resource.data.code.size() < 40000
-        && request.resource.data.c is string && request.resource.data.c.size() < 20
-        && request.resource.data.n is string && request.resource.data.n.size() < 10;
-      // 先生：このメールアドレスでログインしたときだけ、読む・消すができる
-      allow read, delete: if request.auth != null && request.auth.token.email in ['${e}'];
-    }
-    match /back/{key} {
-      // 先生が変えた受験校の記録。生徒は自分の分だけ読める（一覧はできない）。書けるのは先生だけ
-      allow get: if key.size() >= 16;
-      allow create, update: if request.auth != null && request.auth.token.email in ['${e}'];
-    }
-  }
-}`;
+const subState = s => !s.submittedAt ? '未提出' : s.submittedAt === s.updated ? '提出済み' : '提出後に変更';
+async function tSaveStudent(s, extra) {
+  const tok = await tokenOf(FB_AUTH_KEY);
+  s.updated = nowStr(); const t = new Date().toISOString();
+  const f = Object.assign({ y: M.settings.year, c: s.cls, n: s.no, name: s.name, code: await encodeCode(s), t, by: 'teacher' }, extra || {});
+  await fsReq('PATCH', `students/${s.sid}`, tok, { fields: toFields(f) }, Object.keys(f));
+  s.srvT = t;
 }
-/* ---------- 先生が変えた受験校を、生徒の画面に反映する ----------
-   back/{生徒ごとの鍵}：先生の操作（追加・削除）の記録。生徒は自分の鍵の分だけ読める（一覧はできない） */
-async function fbCheckBack() {
-  const me = STATE.me; if (!fbReady() || !me || !me.key) return;
-  try {
-    const r = await fetch(`${fbDocs()}/back/${encodeURIComponent(me.key)}?key=${encodeURIComponent(C.FB_API_KEY)}`, { cache: 'no-store' });
-    if (!r.ok || STATE.me !== me) return;
-    const j = await r.json(); let ops = [];
-    try { ops = JSON.parse(j.fields.ops.stringValue) || []; } catch (e) { }
-    const seen = me.backSeen || ''; const nw = ops.filter(o => o && o.t > seen).sort((a, b) => a.t.localeCompare(b.t));
-    if (!nw.length) return;
-    const wasSubmitted = me.submittedAt && me.submittedAt === me.updated;
-    let a = 0, d = 0;
-    for (const o of nw) {
-      if (o.op === 'add' && !me.picks.some(p => p.id === o.id)) {
-        const x = M.byId[o.id];
-        me.picks.push({ id: o.id, date: o.date || (x && x.date) || '', pref: o.pref || '', status: '', memo: '', snap: x ? snapOf(x) : { uni: '（大学データにない入試）', fac: '', dep: '', met: 'ID ' + o.id, kind: '' } }); a++;
-      } else if (o.op === 'del') { const i = me.picks.findIndex(p => p.id === o.id); if (i >= 0) { me.picks.splice(i, 1); d++; } }
-    }
-    me.backSeen = nw[nw.length - 1].t;
-    if (a || d) { me.backMsg = `先生が受験校を変更しました（${a ? `追加${a}件` : ''}${a && d ? '・' : ''}${d ? `削除${d}件` : ''}）。内容を確認してください。`; }
-    touch(); if (wasSubmitted) { me.submittedAt = me.updated; storeMe(); }
-    if (a || d) { render(); toast(me.backMsg); }
-  } catch (e) { }
-}
-async function fbTeacherSave(s, ops) {
-  const now = new Date().toISOString(); ops.forEach(o => o.t = now);
-  s.updated = nowStr();
-  await fbSubmit(s, await encodeCode(s));          // 先生の画面では、これが最新の提出になる
-  if (!s.key) return false;                          // 古いコードの生徒は鍵がないので、生徒の画面には反映できない
-  const tok = await fbToken(); const url = `${fbDocs()}/back/${encodeURIComponent(s.key)}`;
-  let cur = [];
-  const g = await fetch(url, { headers: { Authorization: 'Bearer ' + tok } });
-  if (g.ok) { try { cur = JSON.parse((await g.json()).fields.ops.stringValue) || []; } catch (e) { } }
-  const r = await fetch(url, { method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok }, body: JSON.stringify({ fields: { ops: { stringValue: JSON.stringify(cur.concat(ops).slice(-100)) }, t: { stringValue: now } } }) });
-  if (!r.ok) throw new Error(`生徒の画面への反映を保存できませんでした（${r.status}）`);
-  return true;
-}
-async function tDeleteStudent(key) {
-  const t = STATE.teacher; const s = t.students.find(x => x.cls + '#' + x.no === key); if (!s) return;
-  if (!fbAuth()) { toast('先に「提出データ」の欄で先生用ログインをしてください'); return; }
-  if (!confirm(`${clsL(s.cls)} ${s.no}番 ${s.name} さんの提出データを、すべて削除します。元に戻せません。よろしいですか？\n（生徒が自分の端末からもう一度提出すると、また表示されます）`)) return;
-  try {
-    const docs = (await fbQuery('EQUAL', M.settings.year)).filter(d => String(d.c) === String(s.cls) && String(d.n) === String(s.no));
-    await fbDelete(docs.map(d => d.name));
-    t.students = t.students.filter(x => x !== s); t.sel.delete(key); t.detail = null;
-    try { sessionStorage.setItem(T_KEY, JSON.stringify(t.students)); } catch (e) { }
-    toast(`${s.name} さんを削除しました`);
-  } catch (e) { toast('削除できませんでした：' + e.message); }
-  render();
-}
+const findStu = key => STATE.teacher.students.find(x => x.cls + '#' + x.no === key);
 async function tEdit(key, op, id) {
-  const s = STATE.teacher.students.find(x => x.cls + '#' + x.no === key); if (!s) return;
+  const s = findStu(key); if (!s) return;
   if (!fbAuth()) { toast('先に「提出データ」の欄で先生用ログインをしてください'); return; }
   const before = JSON.stringify(s.picks);
   if (op === 'add') { if (s.picks.some(p => p.id === id)) { toast('すでに入っています'); return; } const x = M.byId[id]; s.picks.push({ id, date: x.date || '', pref: '', status: '', memo: '', snap: snapOf(x) }); }
   else s.picks = s.picks.filter(p => p.id !== id);
   const x = M.byId[id] || {}; const lbl = `${uniName(x.uni || '')} ${facName(x.fac || '')} ${x.met || ''}`;
   STATE.teacher.saving = true; render();
+  try { await tSaveStudent(s); toast(`${op === 'add' ? '追加' : '削除'}しました：${lbl}。生徒の画面にも反映されます`); }
+  catch (e) { s.picks = JSON.parse(before); toast('保存できませんでした：' + e.message); }
+  STATE.teacher.saving = false; render();
+}
+async function tDeleteStudent(key) {
+  const t = STATE.teacher; const s = findStu(key); if (!s) return;
+  if (!fbAuth()) { toast('先に「提出データ」の欄で先生用ログインをしてください'); return; }
+  if (!confirm(`${clsL(s.cls)} ${s.no}番 ${s.name} さんのデータを削除します。元に戻せません。よろしいですか？\n（同じ組・番号・パスワードでもう一度ログインすると、空の状態から使えます）`)) return;
+  try { await fsReq('DELETE', `students/${s.sid}`, await tokenOf(FB_AUTH_KEY)); t.students = t.students.filter(x => x !== s); t.sel.delete(key); t.detail = null; toast(`${s.name} さんを削除しました`); }
+  catch (e) { toast('削除できませんでした：' + e.message); }
+  render();
+}
+/* 組・番号・氏名・パスワードの変更（先生） */
+async function tSaveAccount(key) {
+  const s = findStu(key); if (!s) return;
+  if (!fbAuth()) { toast('先に先生用ログインをしてください'); return; }
+  const cls = $('#ta-cls').value.trim(), no = String(parseInt($('#ta-no').value, 10) || '').trim(), name = $('#ta-name').value.trim(), pw = $('#ta-pw').value;
+  const msg = m => { const el = $('#ta-msg'); if (el) el.textContent = m; };
+  if (!cls || !no || !name) return msg('組・番号・氏名を入れてください');
+  if (pw.length < 6) return msg('パスワードは6文字以上にしてください');
+  const moved = cls !== String(s.cls) || no !== String(s.no); const pwChanged = pw !== s.pw;
+  if (!moved && !pwChanged && name === s.name) return msg('変更がありません');
+  if (!confirm('この内容で変更しますか？' + (moved ? '\n組・番号を変えると、生徒は新しい組・番号でログインします。' : '') + (pwChanged ? '\nパスワードが変わることを生徒に伝えてください。' : ''))) return;
+  STATE.teacher.saving = true; msg('変更しています…');
   try {
-    const synced = await fbTeacherSave(s, [{ op, id, date: x.date || '' }]);
-    toast(`${op === 'add' ? '追加' : '削除'}しました：${lbl}${synced ? '。生徒が次に開いたとき、生徒の画面にも反映されます' : '。この生徒は古い版で提出しているため、生徒の画面には反映されません（生徒に一度開いて提出し直してもらうと、次から反映されます）'}`);
-  } catch (e) { s.picks = JSON.parse(before); toast('保存できませんでした：' + e.message); }
+    const tok = await tokenOf(FB_AUTH_KEY);
+    if (moved) {
+      const nsid = sidOf(M.settings.year, cls, no);
+      if (STATE.teacher.students.some(x => x !== s && x.sid === nsid)) throw new Error('その組・番号はすでに使われています');
+      try { await idt('signUp', { email: stuEmail(nsid), password: pw, returnSecureToken: true }); } catch (e) { throw new Error(idtMsg(e, 'move')); }
+      const old = s.sid; Object.assign(s, { cls, no, name, sid: nsid, pw });
+      await tSaveStudent(s, { pw, sub: s.submittedAt || '' });
+      await fsReq('DELETE', `students/${old}`, tok);
+    } else {
+      if (pwChanged) {
+        if (!s.pw) throw new Error('今のパスワードが記録されていないため変更できません');
+        let j; try { j = await idt('signInWithPassword', { email: stuEmail(s.sid), password: s.pw, returnSecureToken: true }); } catch (e) { throw new Error('今のパスワードでログインできませんでした（' + idtMsg(e) + '）'); }
+        try { await idt('update', { idToken: j.idToken, password: pw, returnSecureToken: false }); } catch (e) { throw new Error(idtMsg(e)); }
+      }
+      s.name = name; s.pw = pw;
+      await tSaveStudent(s, { pw });
+    }
+    STATE.teacher.detail = s.cls + '#' + s.no; toast('変更しました');
+  } catch (e) { msg('変更できませんでした：' + e.message); STATE.teacher.saving = false; return; }
   STATE.teacher.saving = false; render();
 }
 function tAddResultsHTML(key, q) {
   q = String(q || '').trim(); if (!q) return '<p class="note">大学名・学部・方式などで探します（例：明治 理工、東洋 共テ）。</p>';
-  const s = STATE.teacher.students.find(x => x.cls + '#' + x.no === key); const have = new Set((s ? s.picks : []).map(p => p.id));
+  const s = findStu(key); const have = new Set((s ? s.picks : []).map(p => p.id));
   const ws = q.split(/\s+/);
   const hit = M.rows.filter(x => { const t = uniName(x.uni) + x.uni + uniAbbr(x.uni) + x.fac + x.dep + x.met + x.kind; return ws.every(w => t.includes(w)); });
   if (!hit.length) return '<p class="note">見つかりません。</p>';
   return `<div class="tbl-wrap"><table class="ex"><tbody>${hit.slice(0, 30).map(x => `<tr><td>${esc(label(x))}</td><td>${esc(x.met)}</td><td><span class="chip k-${esc(x.kind)}">${esc(x.kind)}</span></td><td class="d">${x.date ? fmt(x.date) : '共テのみ'}</td>
     <td>${have.has(x.id) ? '<span class="note">入っています</span>' : `<button class="btn sm primary" data-tadd="${esc(x.id)}" data-key="${esc(key)}">追加</button>`}</td></tr>`).join('')}</tbody></table></div>${hit.length > 30 ? `<p class="note">ほか${hit.length - 30}件。言葉を足して絞り込んでください。</p>` : ''}`;
+}
+function fbRules(emails) {
+  const list = String(emails || '').split(/[,、，\s]+/).map(e => e.trim().toLowerCase()).filter(Boolean);
+  const arr = (list.length ? list : ['先生用ログインのメールアドレス']).map(e => `'${e.replace(/'/g, '')}'`).join(', ');
+  return `rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 先生：このメールアドレスでログインしたときだけ、全員分を読む・直す・消すができる
+    function isTeacher() { return request.auth != null && request.auth.token.email in [${arr}]; }
+    // 生徒：自分の組・番号でログインしたときだけ、自分の分を読む・保存できる
+    function isOwner(sid) { return request.auth != null && request.auth.token.email == sid + '@${STU_DOMAIN}'; }
+    function okData() {
+      return request.resource.data.keys().hasOnly(['y', 'c', 'n', 'name', 'code', 't', 'pw', 'sub', 'by'])
+        && request.resource.data.code is string && request.resource.data.code.size() < 40000
+        && request.resource.data.get('by', 'student') == 'student';
+    }
+    match /students/{sid} {
+      allow read, write: if isTeacher();
+      allow get: if isOwner(sid);
+      allow create: if isOwner(sid) && okData();
+      allow update: if isOwner(sid) && okData() && request.resource.data.get('pw', '') == resource.data.get('pw', '');
+    }
+  }
+}`;
 }
 async function loadConfigFile() {
   try { const r = await fetch(C.CONFIG_URL, { cache: 'no-cache' }); if (!r.ok) return; const j = await r.json(); ['SCHOOL', 'CLASSES', 'TEACHER_PW_HASH', 'FB_API_KEY', 'FB_PROJECT_ID'].forEach(k => { if (j[k] !== undefined && j[k] !== null) C[k] = j[k]; }); } catch (e) { }
@@ -864,12 +939,15 @@ function touch() {
   if (!STATE.me) return;
   STATE.me.updated = nowStr();
   STATE.saveState = storeMe() ? 'saved' : 'error';
-  renderSave(); refreshCode();
+  renderSave(); refreshCode(); stuQueueSave();
 }
 function renderSave() {
   const el = $('#save'); if (!el) return;
-  el.textContent = STATE.saveState === 'error' ? 'この端末に保存できません（復元コードを控えてください）' : 'この端末に自動保存';
-  el.className = 'save' + (STATE.saveState === 'error' ? ' err' : '');
+  const online = fbReady() && STATE.me && stuAuthFor(STATE.me);
+  const t = !online ? (STATE.saveState === 'error' ? 'この端末に保存できません' : 'この端末に自動保存')
+    : STATE.srv === 'saving' ? '保存中…' : STATE.srv === 'err' ? 'サーバーに保存できません（通信を確認）' : '自動保存（どの端末からでも開けます）';
+  el.textContent = t; el.title = STATE.srv === 'err' ? (STATE.srvErr || '') : '';
+  el.className = 'save' + (STATE.saveState === 'error' || (online && STATE.srv === 'err') ? ' err' : '');
 }
 function submitStateHTML() {
   const me = STATE.me; if (!me) return '';
@@ -913,23 +991,25 @@ function render() {
 }
 function loginHTML() {
   const saved = loadMe();
+  const fb = fbReady(); const mode = STATE.lmode || 'login';
+  const resumable = saved && (!fb || stuAuthFor(saved));
   const clsInput = C.CLASSES && C.CLASSES.length
     ? `<select id="l-cls" class="inp"><option value="">選択</option>${C.CLASSES.map(c => `<option>${esc(c)}</option>`).join('')}</select>`
     : `<input id="l-cls" class="inp" placeholder="例：3-1" autocomplete="off">`;
   return `<form class="login" id="loginForm" autocomplete="off">
     <h1>受験校プランナー<span class="stamp">${esc(M.settings.year || '')}年度入試</span></h1>
     <p class="sub">${esc(C.SCHOOL || '')} 受験する大学・方式を選んで、日程表とカレンダーを作ります。</p>
-    ${saved ? `<div class="notice info" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="flex:1 1 180px">この端末に <b>${esc(clsL(saved.cls))} ${esc(saved.no)}番 ${esc(saved.name)}</b> さんの入力があります。</span><button type="button" class="btn primary" data-act="resume">続きから</button></div>` : ''}
+    ${resumable ? `<div class="notice info" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="flex:1 1 180px">この端末で <b>${esc(clsL(saved.cls))} ${esc(saved.no)}番 ${esc(saved.name)}</b> さんがログイン中です。</span><button type="button" class="btn primary" data-act="resume">続きから</button></div>` : ''}
+    ${fb ? `<div class="filters" style="margin-bottom:10px"><button type="button" class="fchip" data-lmode="login" aria-pressed="${mode === 'login'}">ログイン</button><button type="button" class="fchip" data-lmode="new" aria-pressed="${mode === 'new'}">はじめて使う</button></div>` : ''}
     <div class="row2"><div class="field"><label for="l-cls">組</label>${clsInput}</div>
     <div class="field"><label for="l-no">番号</label><input id="l-no" class="inp num" inputmode="numeric" placeholder="例：12"></div></div>
     <div class="field"><label for="l-name">氏名</label><input id="l-name" class="inp" placeholder="例：須藤 太郎"></div>
+    ${fb ? `<div class="field"><label for="l-pw">パスワード${mode === 'new' ? '（自分で決める・6文字以上）' : ''}</label><input id="l-pw" class="inp" type="password" autocomplete="${mode === 'new' ? 'new-password' : 'current-password'}"></div>
+      ${mode === 'new' ? `<div class="field"><label for="l-pw2">パスワード（確認のためもう一度）</label><input id="l-pw2" class="inp" type="password" autocomplete="new-password"></div>
+      <p class="notice info" style="font-size:13px">パスワードは<b>あとから自分では変えられません</b>。忘れないようにメモしてください。忘れたときは担任の先生に聞いてください。</p>` : ''}` : ''}
     <div class="err-msg" id="l-err"></div>
-    <button class="btn${saved ? '' : ' primary'}" style="width:100%" id="l-go">${saved ? '新しく始める' : 'はじめる'}</button>
-    <details class="restore" style="margin-top:14px"><summary>復元コードから再開する</summary>
-      <p class="note">別の端末で入力した人や、入力が消えた人は、控えておいた復元コード（JKP… で始まる文字）を貼ってください。</p>
-      <textarea id="r-code" class="inp" rows="3" placeholder="JKP1.…"></textarea>
-      <button type="button" class="btn" style="margin-top:6px" data-act="restore">復元する</button></details>
-    <p class="note">入力はこの端末に自動で保存されます。iPadでは共有ボタンから「ホーム画面に追加」して開くと、入力が消えにくくなります。</p>
+    <button class="btn primary" style="width:100%" id="l-go">${!fb ? 'はじめる' : mode === 'new' ? '登録してはじめる' : 'ログイン'}</button>
+    <p class="note">${fb ? 'どの端末からでも、組・番号・氏名・パスワードで続きから使えます。' : '入力はこの端末に自動で保存されます。'}iPadでは共有ボタンから「ホーム画面に追加」して開くと便利です。</p>
     <p style="text-align:right;margin:10px 0 0"><button type="button" class="linkbtn" data-act="tlogin">教員の方はこちら</button></p>
   </form>`;
 }
@@ -940,21 +1020,48 @@ function startStudent(me, msg) {
   STATE.me = me; STATE.view = 'student'; STATE.tab = me.picks.length ? 'plan' : 'uni'; STATE.newConfirm = false;
   STATE.saveState = storeMe() ? 'saved' : 'error';
   render(); window.scrollTo({ top: 0 }); if (msg) toast(msg);
-  fbCheckBack();
+  stuSync();
 }
-function doLogin(e) {
+async function doLogin(e) {
   e.preventDefault();
   const cls = $('#l-cls').value.trim(), no = String(parseInt($('#l-no').value, 10) || '').trim(), name = $('#l-name').value.trim();
-  const err = $('#l-err');
+  const err = $('#l-err'); err.textContent = '';
   if (!cls || !no || !name) { err.textContent = '組・番号・氏名を入れてください。'; return; }
-  const saved = loadMe();
-  if (saved && saved.cls === cls && saved.no === no) { saved.name = name; startStudent(saved, '続きから開きました'); return; }
-  if (saved && !STATE.newConfirm) {
-    STATE.newConfirm = true;
-    err.textContent = `この端末の ${saved.name} さんの入力は消えます。必要なら先に「続きから」で復元コードを控えてください。よければもう一度「新しく始める」を押してください。`;
-    return;
+  const saved = loadMe(); const same = saved && String(saved.cls) === cls && String(saved.no) === no ? saved : null;
+  if (!fbReady()) {
+    if (same) { same.name = name; startStudent(same, '続きから開きました'); return; }
+    startStudent({ cls, no, name, profile: {}, picks: [], updated: nowStr() }, '受験校を追加していきましょう'); return;
   }
-  startStudent({ cls, no, name, profile: {}, picks: [], updated: nowStr() }, '受験校を追加していきましょう');
+  const pw = $('#l-pw').value; const mode = STATE.lmode || 'login';
+  if (pw.length < 6) { err.textContent = 'パスワードは6文字以上です。'; return; }
+  const btn = $('#l-go'); btn.disabled = true; const label = btn.textContent; btn.textContent = '確認しています…';
+  try {
+    if (mode === 'new') {
+      if (pw !== $('#l-pw2').value) throw new Error('確認用のパスワードが一致しません');
+      try { await stuRegister(cls, no, pw); } catch (ex) { throw new Error(idtMsg(ex)); }
+      const me = same ? Object.assign(same, { name }) : { cls, no, name, profile: {}, picks: [], updated: nowStr() };
+      me.serverT = '';
+      startStudent(me, '登録しました。受験校を追加していきましょう');
+      try { await stuSave({ pw, sub: '' }); } catch (ex) { toast('サーバーに保存できませんでした：' + ex.message); }
+      return;
+    }
+    try { await stuSignIn(cls, no, pw); } catch (ex) { throw new Error(idtMsg(ex)); }
+    const sid = sidOf(M.settings.year, cls, no);
+    const d = await fsReq('GET', `students/${sid}`, await tokenOf(STU_AUTH_KEY));
+    if (d) {
+      const o = fromDoc(d);
+      if (normName(o.name) !== normName(name)) { clearAuth(STU_AUTH_KEY); throw new Error('氏名が登録されているものと違います。組・番号を確認してください'); }
+      let me;
+      if (same && (same.serverT || '') >= o.t && String(same.updated) >= '') me = same;     // この端末の方が新しい（または同じ）
+      else { const s2 = await decodeCode(o.code); me = Object.assign(s2, { serverT: o.t, submittedAt: o.sub || '' }); if (o.by === 'teacher') me.backMsg = '先生が受験校などを変更しています。内容を確認してください。'; }
+      startStudent(me, `${me.name} さん、おかえりなさい`);
+      if (me === same) stuQueueSave();
+    } else {
+      const me = same ? Object.assign(same, { name }) : { cls, no, name, profile: {}, picks: [], updated: nowStr() };
+      startStudent(me, '受験校を追加していきましょう');
+      try { await stuSave({ pw, sub: '' }); } catch (ex) { toast('サーバーに保存できませんでした：' + ex.message); }
+    }
+  } catch (ex) { err.textContent = ex.message; btn.disabled = false; btn.textContent = label; }
 }
 
 /* ============================================================
@@ -968,7 +1075,7 @@ function studentHTML() {
   const me = STATE.me;
   const tabs = [['plan', '受験予定', activePicks().length], ['uni', '大学から追加'], ['cal', 'カレンダーから追加'], ['kyo', '共テ利用'], ['profile', '進路データ']];
   return headerHTML(`<span><b>${esc(clsL(me.cls))}</b> ${esc(me.no)}番 <b>${esc(me.name)}</b></span>`,
-    `<span class="save" id="save"></span><button class="btn sm" data-act="codeopen">復元コード</button><button class="btn sm primary" data-act="submit">先生に提出</button><button class="btn sm ghost" data-act="logout">終了</button>`) +
+    `<span class="save" id="save"></span><button class="btn sm primary" data-act="submit">先生に提出</button><button class="btn sm ghost" data-act="logout">終了</button>`) +
     `<div class="wrap">${M.settings.notice ? `<div class="notice info">${esc(M.settings.notice)}${M.settings.updated ? `（データ更新：${fmt(M.settings.updated, false)}）` : ''}</div>` : ''}
     ${summaryHTML(me)}
     <nav class="tabs" role="tablist">${tabs.map(([k, l, c]) => `<button class="tab" role="tab" aria-selected="${STATE.tab === k}" data-tab="${k}">${l}${c !== undefined ? `<span class="cnt">${c}</span>` : ''}</button>`).join('')}</nav>
@@ -1074,10 +1181,7 @@ function planHTML() {
         <div id="submitState" style="font-size:13px">${submitStateHTML()}</div>
         <button class="btn primary" data-act="submit">先生に提出する</button>
         <p class="note" style="margin:0">押すとすぐ先生に届きます。内容を変えたら、もう一度押してください。</p>
-        <details><summary style="cursor:pointer;font-size:13px">復元コード（バックアップ）</summary>
-          <textarea id="codeBox" class="inp num" rows="4" readonly style="font-size:11px;margin-top:6px;word-break:break-all">${esc(STATE.code)}</textarea>
-          <button class="btn sm" data-act="copycode" style="margin-top:6px">コピー</button>
-          <p class="note">このコードをメモやスクショで残しておくと、別の端末や入力が消えたときに、最初の画面の「復元コードから再開」で元に戻せます。</p></details>
+
       </div>
       <div class="panel export"><h3>書き出す</h3>
         <button class="btn primary" data-act="pdf">受験校一覧をPDFに</button>
@@ -1515,7 +1619,7 @@ function tListHTML() {
     <button class="btn primary" data-act="tprint">選んだ生徒の受験校一覧PDF・1人1枚（${[...t.sel].length}人）</button><label style="font-size:13px"><input type="checkbox" id="t-withcal"${STATE.pdfCal ? ' checked' : ''}> カレンダーも付ける</label><span class="note">CSVは表示中のクラス・検索結果が対象です。</span></div>
     <div class="tbl-wrap" style="border:1px solid var(--line);border-radius:var(--r)"><table class="ttable"><thead><tr><th><input type="checkbox" data-act="selall"${allSel ? ' checked' : ''} aria-label="すべて選択"></th><th>組</th><th>番号</th><th>氏名</th><th>受験校</th><th>一般/併用</th><th>共テ利用</th><th>国公立</th><th>英検</th><th>共テ目標</th><th>第1志望</th><th>更新</th><th></th></tr></thead><tbody>
     ${list.map(s => { const ps = (s.picks || []).filter(p => p.status !== '取りやめ'); const k = n => ps.filter(p => n.includes(exOf(p).kind)).length; const r = kyoTotals(s.profile); const key = s.cls + '#' + s.no;
-      return `<tr><td><input type="checkbox" data-sel="${esc(key)}"${t.sel.has(key) ? ' checked' : ''} aria-label="選択"></td><td>${esc(s.cls)}</td><td class="num">${esc(s.no)}</td><td><b>${esc(s.name)}</b></td><td class="num">${ps.length}</td><td class="num">${k(['一般', '共テ併用'])}</td><td class="num">${k(['共テ利用'])}</td><td class="num">${k(['国公立'])}</td>
+      return `<tr><td><input type="checkbox" data-sel="${esc(key)}"${t.sel.has(key) ? ' checked' : ''} aria-label="選択"></td><td>${esc(s.cls)}</td><td class="num">${esc(s.no)}</td><td><b>${esc(s.name)}</b>${fbReady() && s.sid ? `<div class="note" style="margin:0">${esc(subState(s))}</div>` : ''}</td><td class="num">${ps.length}</td><td class="num">${k(['一般', '共テ併用'])}</td><td class="num">${k(['共テ利用'])}</td><td class="num">${k(['国公立'])}</td>
       <td>${esc((s.profile || {}).eiken || '')}${(s.profile || {}).cse ? ` <span class="num">${esc(s.profile.cse)}</span>` : ''}</td><td class="num">${r.mx ? `${r.tg}/${r.mx}` : ''}</td><td style="max-width:220px;overflow:hidden;text-overflow:ellipsis">${esc((s.profile || {}).hope1 || '')}</td><td class="num">${s.updated ? esc(String(s.updated).slice(5, 16).replace('T', ' ')) : ''}</td>
       <td><button class="btn sm" data-detail="${esc(key)}">詳細</button> <button class="btn sm primary" data-act="ai-copy" data-key="${esc(key)}">AI用にコピー</button></td></tr>`; }).join('') || '<tr><td colspan="13">上の欄から提出データを読み込んでください。</td></tr>'}
     </tbody></table></div>`;
@@ -1525,7 +1629,7 @@ function tDetailHTML(key) {
   const ps = (s.picks || []).slice().sort((a, b) => (exOf(a).date || exOf(a).ann || '9').localeCompare(exOf(b).date || exOf(b).ann || '9'));
   const pf = s.profile || {};
   return `<div class="drawer" data-act="closedetail"><div class="in" data-stop="1">
-    <div class="uhead"><button class="btn sm" data-act="closedetail">閉じる</button><h2>${esc(clsL(s.cls))} ${esc(s.no)}番 ${esc(s.name)}</h2><button class="btn sm primary" data-act="tprint1" data-key="${esc(key)}">PDF</button>${fbReady() ? `<button class="btn sm ghost danger" data-act="tdelstu" data-key="${esc(key)}" style="margin-left:auto">この生徒を削除</button>` : ''}</div>
+    <div class="uhead"><button class="btn sm" data-act="closedetail">閉じる</button><h2>${esc(clsL(s.cls))} ${esc(s.no)}番 ${esc(s.name)}</h2><span class="chip">${esc(subState(s))}</span><button class="btn sm primary" data-act="tprint1" data-key="${esc(key)}">PDF</button>${fbReady() ? `<button class="btn sm ghost danger" data-act="tdelstu" data-key="${esc(key)}" style="margin-left:auto">この生徒を削除</button>` : ''}</div>
     <div class="panel" style="margin-bottom:12px;font-size:14px"><div>英検：${esc(pf.eiken || '—')} ${pf.cse ? `CSE ${esc(pf.cse)}` : ''} ${(pf.ext || []).filter(e => e.type).map(e => esc(e.type + ' ' + (e.score || ''))).join('、')}</div>
       <div>${kyoTotalText(pf)}（共テ${pf.kyoTake === false ? '受験しない' : '受験する'}）</div><div>第1志望：${esc(pf.hope1 || '—')}　系統：${esc(pf.field || '—')}</div>${(pf.subj || []).length ? `<div>受験科目：${esc(subjNames(pf.subj))}</div>` : ''}${pf.memo ? `<div class="notice info" style="margin-bottom:0">生徒から：${esc(pf.memo)}</div>` : ''}</div>
     <div class="tbl-wrap"><table class="ex"><thead><tr><th>試験日</th><th>大学・学部・学科</th><th>方式</th><th>出願締切</th><th>発表</th><th>手続</th><th>位置づけ</th><th>結果</th><th>メモ</th><th></th></tr></thead><tbody>
@@ -1535,6 +1639,11 @@ function tDetailHTML(key) {
       <input id="t-addq" class="inp" data-key="${esc(key)}" placeholder="大学名・学部・方式で探す（例：明治 理工）" value="${esc(STATE.teacher.addq || '')}" style="margin-top:8px">
       <div id="t-addres" style="margin-top:8px">${tAddResultsHTML(key, STATE.teacher.addq)}</div>
       <p class="note" style="margin-bottom:0">追加・削除はすぐ保存され、生徒が次にページを開いたとき、生徒の画面にも反映されます。</p></details>` : ''}
+    ${fbReady() && s.sid ? `<details class="panel" style="margin-top:12px"><summary style="cursor:pointer;font-weight:700">組・番号・氏名・パスワード</summary>
+      <div class="row2" style="margin-top:8px"><div class="field"><label for="ta-cls">組</label><input id="ta-cls" class="inp" value="${esc(s.cls)}"></div><div class="field"><label for="ta-no">番号</label><input id="ta-no" class="inp num" value="${esc(s.no)}"></div></div>
+      <div class="row2"><div class="field"><label for="ta-name">氏名</label><input id="ta-name" class="inp" value="${esc(s.name)}"></div><div class="field"><label for="ta-pw">パスワード</label><input id="ta-pw" class="inp num" value="${esc(s.pw || '')}" autocomplete="off"></div></div>
+      <div class="tools" style="margin:0"><button class="btn" data-act="tacct" data-key="${esc(key)}">変更を保存</button><span class="note" id="ta-msg"></span></div>
+      <p class="note" style="margin-bottom:0">パスワードを忘れた生徒には、ここに出ているパスワードを伝えてください。変えた場合は新しいパスワードを伝えます。</p></details>` : ''}
     <div class="tools" style="margin-top:14px"><button class="btn primary" data-act="ai-copy" data-key="${esc(key)}">生徒の情報をコピー（AI相談用）</button></div></div></div>`;
 }
 /* ============================================================
@@ -1634,17 +1743,17 @@ function tDataHTML() {
       <details style="font-size:13px;margin-bottom:10px"><summary style="cursor:pointer">Firebaseの準備（最初に1回だけ・15分ほど）</summary>
         <ol style="padding-left:1.3em;line-height:1.8;margin:6px 0">
           <li>Googleアカウントで <b>https://console.firebase.google.com</b> を開き、「プロジェクトを作成」。名前は例：jukenko-planner。Googleアナリティクスはオフでよい</li>
-          <li>左のメニュー「構築」→「<b>Authentication</b>」→「始める」→「メール / パスワード」を有効にして保存。「Users」タブの「ユーザーを追加」で、先生用のログインを作る（メールは実在しないものでもよい。例：sensei@jukenko.school）</li>
+          <li>左のメニュー「構築」→「<b>Authentication</b>」→「始める」→「メール / パスワード」を有効にして保存。「Users」タブの「ユーザーを追加」で、先生用のログインを作る。生徒のアカウントは、生徒が「はじめて使う」で自分で作ります（「設定」→「ユーザーアクション」の「作成（登録）を有効にする」はオンのまま）</li>
           <li>「構築」→「<b>Firestore Database</b>」→「データベースを作成」。ロケーションは <b>asia-northeast1（東京）</b>、「本番環境モード」で作成</li>
           <li>Firestoreの「<b>ルール</b>」タブを開き、中身を全部消して、下で作ったルールを貼り付けて「公開」</li>
           <li>左上の歯車 →「プロジェクトの設定」→「マイアプリ」の「&lt;/&gt;」（ウェブ）でアプリを登録（名前は何でも。Hostingは不要）。表示される <b>apiKey</b> と <b>projectId</b> を上の2つの欄に貼り、「設定を保存して公開」</li>
           <li>「生徒一覧」タブで、2.で作った先生用のメールとパスワードでログイン</li>
         </ol>
-        <div class="field" style="margin-top:6px"><label for="fb-rule-email">ルールを作る：先生用ログインのメールアドレス</label><input id="fb-rule-email" class="inp" type="email" placeholder="sensei@jukenko.school"></div>
+        <div class="field" style="margin-top:6px"><label for="fb-rule-email">ルールを作る：先生用ログインのメールアドレス</label><input id="fb-rule-email" class="inp" placeholder="先生用ログインのメール（複数ならカンマ区切り）"></div>
         <textarea id="fb-rules" class="inp num" rows="9" readonly style="font-size:11px">${esc(fbRules(''))}</textarea>
         <div class="tools" style="margin-top:6px"><button class="btn sm" data-act="fb-rules-copy">ルールをコピー</button></div>
-        <p style="margin:4px 0 0">先生用ログインを複数作るときは、ルールの ['…'] の中に 'a@x', 'b@x' のようにカンマで並べます。このアカウントの持ち主の名前は、生徒にも先生にも表示されません。</p>
-        ${fbReady() ? '<div class="tools" style="margin-top:8px"><button class="btn sm ghost danger" data-act="fb-clean">今年度以外の提出データを削除</button></div>' : ''}</details>
+        <p style="margin:4px 0 0">先生用ログインを複数作るときは、上の欄にメールアドレスをカンマで区切って並べます。このアカウントの持ち主の名前は、生徒にも先生にも表示されません。</p>
+        ${fbReady() ? '<div class="tools" style="margin-top:8px"><button class="btn sm ghost danger" data-act="fb-clean">今年度以外の生徒データを削除</button></div>' : ''}</details>
       <div class="field"><label for="cfg-pw">教員パスワードを変える（変えないときは空欄）</label><input id="cfg-pw" class="inp" type="password" autocomplete="new-password"></div>
       <div class="tools"><button class="btn primary" data-act="cfg-save"${tok ? '' : ' disabled'}>設定を保存して公開</button>${tok ? '' : '<span class="note">このパソコンから公開できる状態になると押せます（上の表示を確認）。</span>'}</div>
       ${sys.cfgMsg ? `<p class="notice ${sys.cfgOk ? 'info' : ''}">${esc(sys.cfgMsg)}</p>` : ''}
@@ -1877,6 +1986,7 @@ document.addEventListener('click', async e => {
   }
   if (d.cfield !== undefined) { STATE.cal.field = d.cfield; STATE.cal.focus = ''; rerenderTab(); return; }
   if (d.pview) { STATE.planView = d.pview; rerenderTab(); return; }
+  if (d.lmode) { STATE.lmode = d.lmode; render(); return; }
   if (d.subjon) { STATE.subjOn = !STATE.subjOn; rerenderTab(); return; }
   if (d.subj && STATE.me) {
     const pf = STATE.me.profile; const a = new Set(pf.subj || []); a.has(d.subj) ? a.delete(d.subj) : a.add(d.subj);
@@ -1898,6 +2008,7 @@ document.addEventListener('click', async e => {
     case 'tback': STATE.view = 'login'; render(); break;
     case 'logout': if (STATE.view === 'teacher') { try { sessionStorage.removeItem(TOK_KEY); } catch (ex) { } } if (STATE.me) storeMe(); STATE.me = null; STATE.view = 'login'; render(); window.scrollTo({ top: 0 }); break;
     case 'resume': { const me = loadMe(); if (me) startStudent(me, '続きから開きました'); break; }
+    case 'tacct': await tSaveAccount(d.key); break;
     case 'restore': {
       const v = ($('#r-code') || {}).value || '';
       try { const me = await decodeCode(v); if (me.year && M.settings.year && String(me.year) !== String(M.settings.year)) toast(`${me.year}年度のコードです`); startStudent(me, `${me.name} さんの入力を復元しました`); }
@@ -1908,12 +2019,12 @@ document.addEventListener('click', async e => {
       STATE.code = await encodeCode(STATE.me);
       if (!STATE.me.picks.length) { toast('先に受験校を追加してください'); break; }
       if (!fbReady()) { toast('提出の受け取りがまだ設定されていません。先生に伝えてください'); break; }
-      try { t.disabled = true; await fbSubmit(STATE.me, STATE.code); STATE.me.submittedAt = STATE.me.updated; storeMe(); toast('提出しました。先生に届いています'); }
-      catch (ex) { toast(ex.message + '。時間をおいてもう一度押してください'); }
+      if (!stuAuthFor(STATE.me)) { toast('ログインし直してください（いったん「終了」して、組・番号・氏名・パスワードで入る）'); break; }
+      try { t.disabled = true; await stuSave({ sub: STATE.me.updated }); STATE.me.submittedAt = STATE.me.updated; storeMe(); toast('提出しました。先生に届いています'); }
+      catch (ex) { toast('提出できませんでした：' + ex.message); }
       t.disabled = false; const st = $('#submitState'); if (st) st.innerHTML = submitStateHTML();
       break;
     }
-    case 'backok': if (STATE.me) { delete STATE.me.backMsg; storeMe(); rerenderTab(); } break;
     case 'codeopen': STATE.code = await encodeCode(STATE.me); STATE.codeOpen = true; render(); break;
     case 'codeclose': if (e.target === t || t.matches('button')) { STATE.codeOpen = false; render(); } break;
     case 'sharecode': { STATE.code = await encodeCode(STATE.me); try { await navigator.share({ title: '受験校プランナーの復元コード', text: STATE.code }); } catch (ex) { } break; }
@@ -1954,8 +2065,8 @@ document.addEventListener('click', async e => {
     case 'fb-rules-copy': { const ok = await copyText(fbRules(($('#fb-rule-email') || {}).value)); toast(ok ? 'ルールをコピーしました。Firebaseの「ルール」に貼り替えて「公開」を押してください' : 'コピーできませんでした'); break; }
     case 'fb-clean': {
       if (!fbAuth()) { toast('先に「生徒一覧」タブで先生用ログインをしてください'); break; }
-      if (!confirm(`${M.settings.year}年度以外の提出データを、Firebaseからすべて削除します。よろしいですか？`)) break;
-      try { const docs = await fbQuery('NOT_EQUAL', M.settings.year); const n = await fbDelete(docs.map(d => d.name)); toast(`${n}件削除しました`); } catch (ex) { toast(ex.message); }
+      if (!confirm(`${M.settings.year}年度以外の生徒データを、Firebaseからすべて削除します。よろしいですか？`)) break;
+      try { const tok = await tokenOf(FB_AUTH_KEY); const docs = await fsQueryYear(tok, 'NOT_EQUAL', M.settings.year); for (const d of docs) await fsReq('DELETE', `students/${d._id}`, tok); toast(`${docs.length}人分を削除しました`); } catch (ex) { toast(ex.message); }
       break;
     }
     case 'del': if (pi >= 0) { STATE.me.picks.splice(pi, 1); touch(); rerenderTab(); refreshCounts(); } break;
@@ -2021,7 +2132,7 @@ document.addEventListener('change', e => {
   }
 });
 
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && STATE.view === 'student') fbCheckBack(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && STATE.view === 'student') stuSync(); });
 let lastNarrow = null;
 window.addEventListener('resize', () => { const n = isNarrow(); if (lastNarrow !== null && n !== lastNarrow && STATE.view === 'student' && ['cal', 'plan'].includes(STATE.tab)) rerenderTab(); lastNarrow = n; });
 
