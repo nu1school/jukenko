@@ -559,15 +559,12 @@ function msPanelHTML() {
   if (!msReady()) return '';
   const f = msFile(); const pk = t.msPick;
   const picker = (!f || pk) ? `<div class="mspick">
-      ${f ? '' : `<p style="margin:0 0 8px;font-size:15px"><b>Formsの回答を自動で読み込む</b>　<span class="note">はじめに、このパソコンで1回だけ回答Excelを選びます</span></p>`}
       <div class="tools" style="margin:0"><button class="btn primary" data-act="ms-recent">サインインして回答Excelを選ぶ</button>${f ? '<button class="btn ghost" data-act="ms-pickcancel">やめる</button>' : ''}</div>
       <div class="tools" style="margin:8px 0 0"><input id="ms-link" class="inp" placeholder="一覧にないときは、回答Excelのリンクを貼る（Excelの「共有」→「リンクをコピー」）" style="flex:1 1 280px"><button class="btn" data-act="ms-link">このExcelにする</button></div>
       ${pk && pk.list ? (pk.list.length ? `<p class="note" style="margin:8px 0 0">最近開いたExcel（Formsの回答Excelを押してください）</p><ul class="mslist">${pk.list.map((x, i) => `<li><button class="linkbtn" data-msitem="${i}">${esc(x.name)}</button> <span class="note">${esc(((x.remoteItem || x).lastModifiedDateTime || '').slice(0, 10))}</span></li>`).join('')}</ul>` : '<p class="note">最近開いたExcelが見つかりませんでした。Formsの「回答」→「Excelで開く」で一度開いてからもう一度押すか、リンクを貼ってください。</p>') : ''}
       ${pk && pk.err ? `<p class="w bad">${esc(pk.err)}</p>` : ''}
       <p class="note">回答Excelは、Formsの「回答」タブ →「Excelで開く」で開くExcelです。</p></div>` : '';
-  return `<div class="msbar">${f ? `<div class="tools" style="margin:0"><button class="btn primary" data-act="ms-pull">Formsから最新を読み込む</button>
-      <span class="note">回答Excel：${f.webUrl ? `<a href="${esc(f.webUrl)}" target="_blank" rel="noopener">${esc(f.name)}</a>` : esc(f.name)}</span>${pk ? '' : '<button class="btn sm ghost" data-act="ms-pickopen">Excelを変える</button>'}</div>
-      <div id="msStatus" style="margin-top:6px">${msStatusHTML()}</div>` : ''}${picker}</div>`;
+  return `<div class="msbar">${f ? `<div class="tools" style="margin:0"><span class="note">回答Excel：${f.webUrl ? `<a href="${esc(f.webUrl)}" target="_blank" rel="noopener">${esc(f.name)}</a>` : esc(f.name)}</span>${pk ? '' : '<button class="btn sm ghost" data-act="ms-pickopen">Excelを変える</button><button class="btn sm ghost" data-act="ms-forget">自動読み込みをやめる</button>'}</div>` : ''}${picker}</div>`;
 }
 let msTimer = null;
 function msAuto() {
@@ -1439,18 +1436,70 @@ async function doTLogin(e) {
   try { sessionStorage.setItem(TOK_KEY, h); } catch (ex) { }
   STATE.view = 'teacher'; render();
 }
+/* ---------- 回答Excelをこのパソコンで覚えておく（Chrome・Edge）。OneDriveで同期しているファイルなら、読むたびに最新 ---------- */
+const canRemember = () => !!window.showOpenFilePicker;
+function idb() { return new Promise((res, rej) => { const r = indexedDB.open('jukenko_planner', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+async function kvGet(k) { try { const db = await idb(); return await new Promise(res => { const q = db.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => res(null); }); } catch (e) { return null; } }
+async function kvSet(k, v) { try { const db = await idb(); await new Promise(res => { const tx = db.transaction('kv', 'readwrite'); if (v === null) tx.objectStore('kv').delete(k); else tx.objectStore('kv').put(v, k); tx.oncomplete = res; tx.onerror = res; }); } catch (e) { } }
+async function lfPick() {
+  let h;
+  try { [h] = await window.showOpenFilePicker({ types: [{ description: 'Excel', accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } }], multiple: false }); }
+  catch (e) { return; }
+  await kvSet('respFile', h); STATE.teacher.lf = { name: h.name, handle: h }; await lfRead(true);
+}
+async function lfRead(interactive) {
+  const t = STATE.teacher; const lf = t.lf; if (!lf || !lf.handle || lf.busy) return;
+  lf.busy = true;
+  try {
+    let p = await lf.handle.queryPermission({ mode: 'read' });
+    if (p !== 'granted') {
+      if (!interactive) { lf.need = true; lf.busy = false; if (STATE.view === 'teacher') render(); return; }
+      p = await lf.handle.requestPermission({ mode: 'read' });
+      if (p !== 'granted') throw new Error('ファイルを読む許可がありませんでした');
+    }
+    const file = await lf.handle.getFile();
+    const r = await importTexts(wbTexts(XLSX.read(await file.arrayBuffer(), { type: 'array' })), true);
+    Object.assign(lf, { need: false, err: '', at: new Date().toTimeString().slice(0, 5), mod: file.lastModified, summary: r });
+  } catch (e) { lf.err = e && e.name === 'NotFoundError' ? 'ファイルが見つかりません（移動・名前の変更をしていないか確認してください）。もう一度「Excelを選ぶ」から選んでください' : (e.message || String(e)); }
+  lf.busy = false;
+  if (STATE.view === 'teacher') render();
+}
+let lfTimer = null;
+async function lfInit() {
+  const t = STATE.teacher; if (t.lfInit || !canRemember()) return; t.lfInit = true;
+  const h = await kvGet('respFile');
+  if (h && !t.lf) { t.lf = { name: h.name, handle: h }; await lfRead(false); }
+  if (!lfTimer) lfTimer = setInterval(() => { const lf = STATE.teacher.lf; if (STATE.view === 'teacher' && document.visibilityState === 'visible' && lf && !lf.need && !lf.err) lfRead(false); }, 5 * 60e3);
+}
+function lfStatusHTML() {
+  const lf = STATE.teacher.lf; if (!lf) return '';
+  if (lf.busy) return '<span class="note">読み込んでいます…</span>';
+  if (lf.err) return `<span class="w bad">${esc(lf.err)}</span>`;
+  if (lf.need) return '<span class="note">「最新を読み込む」を押すと、前回選んだExcelを読み込みます（ブラウザが許可を確認します）。</span>';
+  if (lf.at) return `<span class="okmsg">${esc(lf.at)} に読み込みました。</span><span class="note">${esc(lf.summary || '')}　開いている間は5分ごとに読み直します。${lf.mod ? `　Excelの最終更新 ${esc(new Date(lf.mod).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}` : ''}</span>`;
+  return '';
+}
 function importPanelHTML() {
-  const t = STATE.teacher; const auto = msReady() && msFile();
-  const manual = `<p style="margin:0 0 8px;font-size:14px">Formsの回答Excel（.xlsx）や、コードを貼ったメール・Classroomの画面をまとめてコピーしたものを入れてください。中から JKP… のコードだけを拾います。同じ生徒が何回出していても、いちばん新しいものを使います。</p>
-    <div class="tools"><input type="file" id="imp-files" accept=".xlsx,.xls,.csv,.txt" multiple class="inp" style="width:auto;flex:1 1 220px"></div>
-    <textarea id="imp-text" class="inp" rows="3" placeholder="ここに貼り付け（何人分でも、前後に文章が混ざっていてもOK）"></textarea>
-    <div class="tools" style="margin:8px 0 0"><button class="btn primary" data-act="imp-go">貼り付けた内容を読み込む</button></div>`;
-  return `<section class="panel" style="margin-bottom:14px"><h3>提出データを読み込む</h3>
-    ${msPanelHTML()}
-    ${auto ? `<details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px">ファイルや貼り付けで読み込む（手動）</summary><div style="margin-top:8px">${manual}</div></details>` : manual}
-    <div class="tools" style="margin:8px 0 0"><button class="btn ghost" data-act="imp-clear">読み込んだデータを消す</button><span class="note">${t.students.length}人分を表示中。データはこの画面にだけあり、閉じると消えます。</span></div>
-    ${t.imp && !(auto && t.ms && t.ms.at) ? `<p class="notice info" style="margin-bottom:0">${esc(t.imp)}</p>` : ''}
-    ${!msReady() ? '<p class="note" style="margin-bottom:0">システム設定で「Microsoft 365 連携」を設定すると、Formsの回答をボタン1つで自動で読み込めます。</p>' : ''}</section>`;
+  const t = STATE.teacher; const lf = t.lf; const msOn = msReady() && msFile();
+  const pickBtn = (primary) => canRemember()
+    ? `<button class="btn${primary ? ' primary' : ''}" data-act="lf-pick">${lf ? '別のExcelを選ぶ' : 'Excelを選ぶ'}</button>`
+    : `<label class="btn${primary ? ' primary' : ''}" style="cursor:pointer">Excelを選ぶ<input type="file" id="imp-files" accept=".xlsx,.xls,.csv,.txt" multiple hidden></label>`;
+  const main = msOn
+    ? `<button class="btn primary" data-act="ms-pull">Formsから最新を読み込む</button>${pickBtn(false)}`
+    : lf ? `<button class="btn primary" data-act="lf-read">最新を読み込む</button><span class="note">${esc(lf.name)}</span>${pickBtn(false)}`
+    : pickBtn(true);
+  const status = msOn ? `<div id="msStatus">${msStatusHTML()}</div>` : lf ? lfStatusHTML() : (t.imp ? `<span class="note">${esc(t.imp)}</span>` : '');
+  return `<section class="panel imp" style="margin-bottom:14px"><h3>提出データ（Formsの回答Excel）</h3>
+    <div class="tools" style="margin:0;align-items:center">${main}</div>
+    ${status ? `<div style="margin-top:6px">${status}</div>` : ''}
+    ${!msOn && !lf ? `<p class="note" style="margin:6px 0 0">Formsの「回答」→「Excelで開く」で保存したExcelを選びます。${canRemember() ? '選んだExcelはこのパソコンで覚えるので、次からは「最新を読み込む」を押すだけです。OneDriveで同期しているフォルダのExcelを選べば、いつも最新の回答が読めます。' : ''}</p>` : ''}
+    <details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px;color:var(--muted)">ほかの読み込み方・設定</summary><div style="margin-top:8px">
+      <p style="margin:0 0 6px;font-size:13px"><b>貼り付けで読み込む</b>：コードを貼ったメール・Classroomの画面をまとめてコピーしたものを貼ります。中から JKP… のコードだけを拾い、同じ生徒は新しいものを使います。</p>
+      <textarea id="imp-text" class="inp" rows="3" placeholder="ここに貼り付け（何人分でも、前後に文章が混ざっていてもOK）"></textarea>
+      <div class="tools" style="margin:6px 0 10px"><button class="btn" data-act="imp-go">貼り付けた内容を読み込む</button>${lf ? '<button class="btn ghost" data-act="lf-forget">選んだExcelを忘れる</button>' : ''}<button class="btn ghost" data-act="imp-clear">読み込んだデータを消す</button></div>
+      ${msReady() ? `<p style="margin:0 0 6px;font-size:13px"><b>Microsoft 365から自動で読み込む</b>（学校の設定で許可されている場合）</p>${msPanelHTML()}` : ''}
+    </div></details>
+    <p class="note" style="margin:8px 0 0">${t.students.length}人分を表示中。データはこの画面にだけあり、閉じると消えます。</p></section>`;
 }
 async function importTexts(texts, quiet) {
   const t = STATE.teacher; const codes = new Set();
@@ -1820,7 +1869,7 @@ async function convertKeinet(files) {
    イベント
    ============================================================ */
 function afterRender() {
-  renderSave(); msAuto();
+  renderSave(); msAuto(); if (STATE.view === 'teacher' && isTeacherOk()) lfInit();
   const lf = $('#loginForm'); if (lf) lf.addEventListener('submit', doLogin);
   const tf = $('#tForm'); if (tf) tf.addEventListener('submit', doTLogin);
   $$('details.fac').forEach(d => d.addEventListener('toggle', () => {
@@ -1929,6 +1978,10 @@ document.addEventListener('click', async e => {
     case 'gh-recheck': STATE.teacher.gh = { st: 'checking' }; render(); await checkGh(); render(); break;
     case 'chk-preview': if (STATE.teacher.chk && STATE.teacher.chk.wb) { ingestWorkbook(STATE.teacher.chk.wb); STATE.preview = true; render(); toast('この端末だけ、チェックしたデータで表示しています'); } break;
     case 'ms-pull': await msPull(true); break;
+    case 'ms-forget': try { localStorage.removeItem(MS_FILE_KEY); } catch (ex) { } STATE.teacher.ms = null; render(); break;
+    case 'lf-pick': await lfPick(); break;
+    case 'lf-read': await lfRead(true); break;
+    case 'lf-forget': await kvSet('respFile', null); STATE.teacher.lf = null; render(); break;
     case 'ms-pickopen': STATE.teacher.msPick = {}; render(); break;
     case 'ms-pickcancel': STATE.teacher.msPick = null; render(); break;
     case 'ms-link': { const pk = STATE.teacher.msPick = STATE.teacher.msPick || {}; try { await msPickByLink(($('#ms-link') || {}).value); STATE.teacher.msPick = null; STATE.teacher.ms = null; render(); await msPull(true); } catch (ex) { pk.err = ex.message; render(); } break; }
