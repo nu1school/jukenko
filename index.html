@@ -559,12 +559,12 @@ function msPanelHTML() {
   if (!msReady()) return '';
   const f = msFile(); const pk = t.msPick;
   const picker = (!f || pk) ? `<div class="mspick">
-      <p style="margin:0 0 6px;font-size:14px"><b>Formsの回答Excelを選んでください</b>（このパソコンで1回だけ）</p>
-      <div class="tools" style="margin:0"><input id="ms-link" class="inp" placeholder="回答Excelのリンクを貼る（OneDriveやSharePointで「リンクをコピー」したもの）" style="flex:1 1 280px"><button class="btn" data-act="ms-link">このExcelにする</button></div>
-      <div class="tools" style="margin:6px 0 0"><button class="btn ghost" data-act="ms-recent">最近開いたExcelから選ぶ</button>${f ? '<button class="btn ghost" data-act="ms-pickcancel">やめる</button>' : ''}</div>
-      ${pk && pk.list ? (pk.list.length ? `<ul class="mslist">${pk.list.map((x, i) => `<li><button class="linkbtn" data-msitem="${i}">${esc(x.name)}</button> <span class="note">${esc(((x.remoteItem || x).lastModifiedDateTime || '').slice(0, 10))}</span></li>`).join('')}</ul>` : '<p class="note">最近開いたExcelが見つかりませんでした。リンクを貼って選んでください。</p>') : ''}
+      ${f ? '' : `<p style="margin:0 0 8px;font-size:15px"><b>Formsの回答を自動で読み込む</b>　<span class="note">はじめに、このパソコンで1回だけ回答Excelを選びます</span></p>`}
+      <div class="tools" style="margin:0"><button class="btn primary" data-act="ms-recent">サインインして回答Excelを選ぶ</button>${f ? '<button class="btn ghost" data-act="ms-pickcancel">やめる</button>' : ''}</div>
+      <div class="tools" style="margin:8px 0 0"><input id="ms-link" class="inp" placeholder="一覧にないときは、回答Excelのリンクを貼る（Excelの「共有」→「リンクをコピー」）" style="flex:1 1 280px"><button class="btn" data-act="ms-link">このExcelにする</button></div>
+      ${pk && pk.list ? (pk.list.length ? `<p class="note" style="margin:8px 0 0">最近開いたExcel（Formsの回答Excelを押してください）</p><ul class="mslist">${pk.list.map((x, i) => `<li><button class="linkbtn" data-msitem="${i}">${esc(x.name)}</button> <span class="note">${esc(((x.remoteItem || x).lastModifiedDateTime || '').slice(0, 10))}</span></li>`).join('')}</ul>` : '<p class="note">最近開いたExcelが見つかりませんでした。Formsの「回答」→「Excelで開く」で一度開いてからもう一度押すか、リンクを貼ってください。</p>') : ''}
       ${pk && pk.err ? `<p class="w bad">${esc(pk.err)}</p>` : ''}
-      <p class="note">Formsの「回答」タブ →「Excelで開く」で開くExcelです。開いた画面の「共有」→「リンクをコピー」で取れます。</p></div>` : '';
+      <p class="note">回答Excelは、Formsの「回答」タブ →「Excelで開く」で開くExcelです。</p></div>` : '';
   return `<div class="msbar">${f ? `<div class="tools" style="margin:0"><button class="btn primary" data-act="ms-pull">Formsから最新を読み込む</button>
       <span class="note">回答Excel：${f.webUrl ? `<a href="${esc(f.webUrl)}" target="_blank" rel="noopener">${esc(f.name)}</a>` : esc(f.name)}</span>${pk ? '' : '<button class="btn sm ghost" data-act="ms-pickopen">Excelを変える</button>'}</div>
       <div id="msStatus" style="margin-top:6px">${msStatusHTML()}</div>` : ''}${picker}</div>`;
