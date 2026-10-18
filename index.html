@@ -15,9 +15,6 @@
 window.CONFIG = {
   // 大学データ（Excel）。GitHub Pages に置くなら相対パスのままでOK
   MASTER_URL: 'data/master.xlsx',
-  // 提出先：Microsoft Forms の「事前入力済みリンク」をそのまま貼る（作り方は README）。
-  // 組・番号・氏名・提出コードの欄に、それぞれ CLASS / NO / NAME / CODE と入れて取得したURLです。空欄なら提出ボタンは「コードをコピー」になります
-  FORM_URL: 'https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=GHfprcz9AEmVhDXsMMWmrPM0b5nG_XhMtPy8dELv799UQkFVUUE2Nk1YVEhZTDJYUThPWU5KUjM3TS4u&r40bc3edd84164de48ecdd88c22738bd6=CLASS&r41302d5b42454dff869349e9cf58a821=NO&r74e50b72ed5f4c50bec16c8ed131ff9c=NAME&r9bfaf319ed6a43d996dcb1ed8d7c5439=CODE',
   // 画面に出す学校名
   SCHOOL: '',
   // 組の選択肢。空配列なら自由入力
@@ -28,9 +25,6 @@ window.CONFIG = {
   CONFIG_URL: 'data/config.json',
   GITHUB_REPO: 'nu1school/jukenko',
   GITHUB_BRANCH: 'main',
-  // Microsoft 365 連携（Formsの回答Excelを教員ページから直接読む）。システム設定で入れると config.json に保存されます
-  MS_CLIENT_ID: '',
-  MS_TENANT_ID: '',
   // Firebase（Google）での提出・自動受け取り。システム設定で入れると config.json に保存されます
   FB_API_KEY: '',
   FB_PROJECT_ID: ''
@@ -269,8 +263,6 @@ table.ex td.sj{font-size:12px;min-width:230px;max-width:340px;line-height:1.45}
 .fchip.strong{border-color:var(--ai);color:var(--ai);font-weight:700}
 .livedot{color:var(--c-ann);font-size:12px;animation:blink 2s infinite}
 @keyframes blink{50%{opacity:.35}}
-.msbar{background:var(--sunken);border-radius:10px;padding:10px 12px}
-.mspick{margin-top:8px} .mslist{margin:6px 0 0;padding-left:1.2em;font-size:14px;line-height:1.9}
 .ghst{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;border-radius:10px;padding:10px 14px;font-size:14px;margin-bottom:8px}
 .ghst b{font-size:15px} .ghst span{font-size:13px;flex:1 1 260px}
 .ghst.ok{background:var(--c-ann-soft);color:var(--c-ann)} .ghst.ng{background:var(--warn-soft);color:var(--warn)}
@@ -434,153 +426,6 @@ async function ghPutFile(path, b64, message) {
   return ghFetch(`/contents/${path}`, { method: 'PUT', body: JSON.stringify({ message, content: b64, sha, branch: C.GITHUB_BRANCH, author: who, committer: who }) });
 }
 /* ============================================================
-   Microsoft 365 連携：Formsの回答Excel（OneDrive/SharePoint）を教員ページから直接読む
-   ・サインインは学校のMicrosoftアカウント（PKCE、サーバー不要）
-   ・トークンはこのタブの間だけ保存（sessionStorage）。選んだExcelはこのブラウザに保存
-   ============================================================ */
-const MS_FILE_KEY = 'jukenko_planner_ms_file', MS_TOK_KEY = 'jukenko_planner_ms_token', MS_PKCE_KEY = 'jukenko_planner_ms_pkce';
-const MS_SCOPE = 'openid profile offline_access Files.Read.All';
-const msReady = () => !!(C.MS_CLIENT_ID && C.MS_TENANT_ID);
-const msRedirect = () => location.origin + location.pathname;
-const msAuthBase = () => `https://login.microsoftonline.com/${encodeURIComponent(C.MS_TENANT_ID)}/oauth2/v2.0`;
-function msFile() { try { return JSON.parse(localStorage.getItem(MS_FILE_KEY)) || null; } catch (e) { return null; } }
-function msTok() { try { return JSON.parse(sessionStorage.getItem(MS_TOK_KEY)) || null; } catch (e) { return null; } }
-function msSaveTok(j) {
-  const t = { at: j.access_token, rt: j.refresh_token || (msTok() || {}).rt || '', exp: Date.now() + ((j.expires_in || 3600) - 120) * 1000 };
-  try { sessionStorage.setItem(MS_TOK_KEY, JSON.stringify(t)); } catch (e) { }
-  return t;
-}
-function msRand(n) { const a = new Uint8Array(n); crypto.getRandomValues(a); return b64u(a); }
-async function msTokenReq(params) {
-  const res = await fetch(msAuthBase() + '/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(Object.assign({ client_id: C.MS_CLIENT_ID, scope: MS_SCOPE }, params)) });
-  const j = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(msErrText(j.error_description || j.error || ''));
-  return msSaveTok(j);
-}
-function msErrText(m) {
-  m = String(m || '');
-  if (/AADSTS65001|consent/i.test(m)) return 'このアプリの利用がまだ許可されていません。情報担当の先生に「管理者の同意」を依頼してください';
-  if (/AADSTS50011|redirect/i.test(m)) return 'アプリの登録のリダイレクトURIが、このページのURLと一致していません';
-  if (/AADSTS700016|AADSTS90002|not found/i.test(m)) return 'アプリのIDまたはテナントIDが正しくありません（システム設定を確認）';
-  if (/AADSTS9002326|Single-Page/i.test(m)) return 'アプリの登録で、リダイレクトURIの種類を「シングルページ アプリケーション」にしてください';
-  return 'サインインできませんでした：' + m.split(/\r?\n/)[0];
-}
-async function msSignIn() {
-  const verifier = msRand(48);
-  const challenge = b64u(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))));
-  const state = msRand(12);
-  try { sessionStorage.setItem(MS_PKCE_KEY, JSON.stringify({ verifier, state })); } catch (e) { }
-  const url = msAuthBase() + '/authorize?' + new URLSearchParams({ client_id: C.MS_CLIENT_ID, response_type: 'code', redirect_uri: msRedirect(), scope: MS_SCOPE, code_challenge: challenge, code_challenge_method: 'S256', state, response_mode: 'query', prompt: 'select_account' });
-  const w = window.open(url, 'jukenko_ms', 'width=520,height=680');
-  if (!w) { saveUI(); location.href = url; return new Promise(() => { }); } // ポップアップが使えない → 画面ごと移動して戻る
-  return new Promise((resolve, reject) => {
-    const on = async ev => {
-      if (ev.origin !== location.origin || !ev.data || ev.data.jkpAuth !== 1) return;
-      window.removeEventListener('message', on); clearInterval(tm);
-      try { resolve(await msFinish(ev.data.q)); } catch (e) { reject(e); }
-    };
-    window.addEventListener('message', on);
-    const tm = setInterval(() => { if (w.closed) { clearInterval(tm); setTimeout(() => { window.removeEventListener('message', on); reject(new Error('サインインの画面が閉じられました')); }, 800); } }, 700);
-  });
-}
-async function msFinish(q) {
-  const p = new URLSearchParams(q); let pk = {};
-  try { pk = JSON.parse(sessionStorage.getItem(MS_PKCE_KEY)) || {}; } catch (e) { }
-  if (p.get('error')) throw new Error(msErrText(p.get('error_description') || p.get('error')));
-  if (!p.get('code') || p.get('state') !== pk.state) throw new Error('サインインの確認に失敗しました。もう一度試してください');
-  try { sessionStorage.removeItem(MS_PKCE_KEY); } catch (e) { }
-  return msTokenReq({ grant_type: 'authorization_code', code: p.get('code'), redirect_uri: msRedirect(), code_verifier: pk.verifier });
-}
-/* サインイン画面から戻ってきたとき（起動の最初に呼ぶ）。true なら通常の起動はしない */
-function msHandleReturn() {
-  const q = location.search;
-  if (!/[?&](code|error)=/.test(q) || !/[?&]state=/.test(q)) return false;
-  if (window.opener && window.opener !== window) {
-    try { window.opener.postMessage({ jkpAuth: 1, q }, location.origin); } catch (e) { }
-    document.body.innerHTML = '<p style="padding:24px;font-family:sans-serif">サインインしました。この画面は閉じてかまいません。</p>';
-    setTimeout(() => window.close(), 300); return true;
-  }
-  history.replaceState(null, '', msRedirect()); STATE.msPending = q; return false;
-}
-async function msAccess(interactive) {
-  const t = msTok();
-  if (t && t.at && Date.now() < t.exp) return t.at;
-  if (t && t.rt) { try { return (await msTokenReq({ grant_type: 'refresh_token', refresh_token: t.rt })).at; } catch (e) { } }
-  if (!interactive) throw Object.assign(new Error('サインインが必要です'), { needLogin: true });
-  return (await msSignIn()).at;
-}
-async function graph(path, interactive) {
-  const at = await msAccess(interactive);
-  const res = await fetch('https://graph.microsoft.com/v1.0' + path, { headers: { Authorization: 'Bearer ' + at } });
-  if (res.status === 401) { try { sessionStorage.removeItem(MS_TOK_KEY); } catch (e) { } throw Object.assign(new Error('サインインの期限が切れました。もう一度サインインしてください'), { needLogin: true }); }
-  if (!res.ok) {
-    let m = ''; try { m = (await res.json()).error.message; } catch (e) { }
-    throw new Error(res.status === 403 ? 'このファイルを読む権限がありません（あなたに共有されているか確認してください）' : res.status === 404 ? 'ファイルが見つかりません（移動・削除されていないか、リンクが正しいか確認してください）' : `読み込めませんでした（${res.status}）${m}`);
-  }
-  return res.json();
-}
-function msSetFile(it) {
-  const r = it.remoteItem || it;
-  const f = { driveId: (r.parentReference || {}).driveId, id: r.id, name: r.name || it.name, webUrl: r.webUrl || it.webUrl || '' };
-  if (!f.driveId || !f.id) throw new Error('このファイルは選べませんでした');
-  try { localStorage.setItem(MS_FILE_KEY, JSON.stringify(f)); } catch (e) { }
-  return f;
-}
-async function msPickByLink(url) {
-  url = String(url || '').trim(); if (!/^https:\/\//.test(url)) throw new Error('https:// で始まるリンクを貼ってください');
-  const id = 'u!' + btoa(unescape(encodeURIComponent(url))).replace(/=+$/, '').replace(/\//g, '_').replace(/\+/g, '-');
-  const it = await graph(`/shares/${id}/driveItem`, true);
-  if (!/\.xlsx$/i.test(it.name || '')) throw new Error(`「${it.name}」はExcelファイルではありません`);
-  return msSetFile(it);
-}
-async function msRecent() {
-  const j = await graph('/me/drive/recent?$top=60', true);
-  return (j.value || []).filter(x => /\.xlsx$/i.test(x.name || '')).slice(0, 20);
-}
-function wbTexts(wb) { return wb.SheetNames.map(n => XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, defval: '' }).map(r => r.join('\t')).join('\n')); }
-async function msPull(interactive) {
-  const t = STATE.teacher; const f = msFile(); if (!f || !msReady()) return;
-  if (t.ms && t.ms.busy) return;
-  t.ms = Object.assign({}, t.ms, { busy: true, err: '' }); msPaint();
-  try {
-    const it = await graph(`/drives/${encodeURIComponent(f.driveId)}/items/${encodeURIComponent(f.id)}`, interactive);
-    const dl = it['@microsoft.graph.downloadUrl']; if (!dl) throw new Error('ファイルをダウンロードできませんでした');
-    const buf = await (await fetch(dl, { cache: 'no-store' })).arrayBuffer();
-    const r = await importTexts(wbTexts(XLSX.read(buf, { type: 'array' })), true);
-    t.ms = { at: new Date().toTimeString().slice(0, 5), summary: r, name: it.name };
-  } catch (e) { t.ms = { err: e.message, needLogin: !!e.needLogin }; }
-  if (STATE.view === 'teacher') render();
-}
-function msPaint() { const el = $('#msStatus'); if (el) el.innerHTML = msStatusHTML(); }
-function msStatusHTML() {
-  const m = STATE.teacher.ms || {};
-  if (m.busy) return '<span class="note">読み込んでいます…</span>';
-  if (m.err) return `<span class="w bad">${esc(m.err)}</span>${m.needLogin ? ' <button class="btn sm" data-act="ms-pull">サインインして読み込む</button>' : ''}`;
-  if (m.at) return `<span class="okmsg">${esc(m.at)} に読み込みました。</span><span class="note">${esc(m.summary || '')}　開いている間は5分ごとに自動で更新します。</span>`;
-  return '<span class="note">押すと、Formsの最新の回答を読み込みます（最初だけMicrosoftのサインインが出ます）。</span>';
-}
-function msPanelHTML() {
-  const t = STATE.teacher;
-  if (!msReady()) return '';
-  const f = msFile(); const pk = t.msPick;
-  const picker = (!f || pk) ? `<div class="mspick">
-      <div class="tools" style="margin:0"><button class="btn primary" data-act="ms-recent">サインインして回答Excelを選ぶ</button>${f ? '<button class="btn ghost" data-act="ms-pickcancel">やめる</button>' : ''}</div>
-      <div class="tools" style="margin:8px 0 0"><input id="ms-link" class="inp" placeholder="一覧にないときは、回答Excelのリンクを貼る（Excelの「共有」→「リンクをコピー」）" style="flex:1 1 280px"><button class="btn" data-act="ms-link">このExcelにする</button></div>
-      ${pk && pk.list ? (pk.list.length ? `<p class="note" style="margin:8px 0 0">最近開いたExcel（Formsの回答Excelを押してください）</p><ul class="mslist">${pk.list.map((x, i) => `<li><button class="linkbtn" data-msitem="${i}">${esc(x.name)}</button> <span class="note">${esc(((x.remoteItem || x).lastModifiedDateTime || '').slice(0, 10))}</span></li>`).join('')}</ul>` : '<p class="note">最近開いたExcelが見つかりませんでした。Formsの「回答」→「Excelで開く」で一度開いてからもう一度押すか、リンクを貼ってください。</p>') : ''}
-      ${pk && pk.err ? `<p class="w bad">${esc(pk.err)}</p>` : ''}
-      <p class="note">回答Excelは、Formsの「回答」タブ →「Excelで開く」で開くExcelです。</p></div>` : '';
-  return `<div class="msbar">${f ? `<div class="tools" style="margin:0"><span class="note">回答Excel：${f.webUrl ? `<a href="${esc(f.webUrl)}" target="_blank" rel="noopener">${esc(f.name)}</a>` : esc(f.name)}</span>${pk ? '' : '<button class="btn sm ghost" data-act="ms-pickopen">Excelを変える</button><button class="btn sm ghost" data-act="ms-forget">自動読み込みをやめる</button>'}</div>` : ''}${picker}</div>`;
-}
-let msTimer = null;
-function msAuto() {
-  if (STATE.view !== 'teacher' || !isTeacherOk() || !msReady() || !msFile()) return;
-  const t = STATE.teacher;
-  if (!t.msAutoDone) { t.msAutoDone = true; const tk = msTok(); if (tk && (tk.rt || Date.now() < tk.exp)) msPull(false); }
-  if (!msTimer) msTimer = setInterval(() => {
-    if (STATE.view === 'teacher' && document.visibilityState === 'visible' && msFile() && msTok() && !(STATE.teacher.ms || {}).needLogin) msPull(false);
-  }, 5 * 60e3);
-}
-/* ============================================================
    Firebase（Google）：生徒はボタン1つで提出、先生は開くだけで最新を受け取る
    ・生徒は「新しく提出する」ことだけできる。読む・消すは先生用ログインのみ（Firestoreのルールで制限）
    ============================================================ */
@@ -673,11 +518,77 @@ service cloud.firestore {
       // 先生：このメールアドレスでログインしたときだけ、読む・消すができる
       allow read, delete: if request.auth != null && request.auth.token.email in ['${e}'];
     }
+    match /back/{key} {
+      // 先生が変えた受験校の記録。生徒は自分の分だけ読める（一覧はできない）。書けるのは先生だけ
+      allow get: if key.size() >= 16;
+      allow create, update: if request.auth != null && request.auth.token.email in ['${e}'];
+    }
   }
 }`;
 }
+/* ---------- 先生が変えた受験校を、生徒の画面に反映する ----------
+   back/{生徒ごとの鍵}：先生の操作（追加・削除）の記録。生徒は自分の鍵の分だけ読める（一覧はできない） */
+async function fbCheckBack() {
+  const me = STATE.me; if (!fbReady() || !me || !me.key) return;
+  try {
+    const r = await fetch(`${fbDocs()}/back/${encodeURIComponent(me.key)}?key=${encodeURIComponent(C.FB_API_KEY)}`, { cache: 'no-store' });
+    if (!r.ok || STATE.me !== me) return;
+    const j = await r.json(); let ops = [];
+    try { ops = JSON.parse(j.fields.ops.stringValue) || []; } catch (e) { }
+    const seen = me.backSeen || ''; const nw = ops.filter(o => o && o.t > seen).sort((a, b) => a.t.localeCompare(b.t));
+    if (!nw.length) return;
+    const wasSubmitted = me.submittedAt && me.submittedAt === me.updated;
+    let a = 0, d = 0;
+    for (const o of nw) {
+      if (o.op === 'add' && !me.picks.some(p => p.id === o.id)) {
+        const x = M.byId[o.id];
+        me.picks.push({ id: o.id, date: o.date || (x && x.date) || '', pref: o.pref || '', status: '', memo: '', snap: x ? snapOf(x) : { uni: '（大学データにない入試）', fac: '', dep: '', met: 'ID ' + o.id, kind: '' } }); a++;
+      } else if (o.op === 'del') { const i = me.picks.findIndex(p => p.id === o.id); if (i >= 0) { me.picks.splice(i, 1); d++; } }
+    }
+    me.backSeen = nw[nw.length - 1].t;
+    if (a || d) { me.backMsg = `先生が受験校を変更しました（${a ? `追加${a}件` : ''}${a && d ? '・' : ''}${d ? `削除${d}件` : ''}）。内容を確認してください。`; }
+    touch(); if (wasSubmitted) { me.submittedAt = me.updated; storeMe(); }
+    if (a || d) { render(); toast(me.backMsg); }
+  } catch (e) { }
+}
+async function fbTeacherSave(s, ops) {
+  const now = new Date().toISOString(); ops.forEach(o => o.t = now);
+  s.updated = nowStr();
+  await fbSubmit(s, await encodeCode(s));          // 先生の画面では、これが最新の提出になる
+  if (!s.key) return false;                          // 古いコードの生徒は鍵がないので、生徒の画面には反映できない
+  const tok = await fbToken(); const url = `${fbDocs()}/back/${encodeURIComponent(s.key)}`;
+  let cur = [];
+  const g = await fetch(url, { headers: { Authorization: 'Bearer ' + tok } });
+  if (g.ok) { try { cur = JSON.parse((await g.json()).fields.ops.stringValue) || []; } catch (e) { } }
+  const r = await fetch(url, { method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok }, body: JSON.stringify({ fields: { ops: { stringValue: JSON.stringify(cur.concat(ops).slice(-100)) }, t: { stringValue: now } } }) });
+  if (!r.ok) throw new Error(`生徒の画面への反映を保存できませんでした（${r.status}）`);
+  return true;
+}
+async function tEdit(key, op, id) {
+  const s = STATE.teacher.students.find(x => x.cls + '#' + x.no === key); if (!s) return;
+  if (!fbAuth()) { toast('先に「提出データ」の欄で先生用ログインをしてください'); return; }
+  const before = JSON.stringify(s.picks);
+  if (op === 'add') { if (s.picks.some(p => p.id === id)) { toast('すでに入っています'); return; } const x = M.byId[id]; s.picks.push({ id, date: x.date || '', pref: '', status: '', memo: '', snap: snapOf(x) }); }
+  else s.picks = s.picks.filter(p => p.id !== id);
+  const x = M.byId[id] || {}; const lbl = `${uniName(x.uni || '')} ${facName(x.fac || '')} ${x.met || ''}`;
+  STATE.teacher.saving = true; render();
+  try {
+    const synced = await fbTeacherSave(s, [{ op, id, date: x.date || '' }]);
+    toast(`${op === 'add' ? '追加' : '削除'}しました：${lbl}${synced ? '。生徒が次に開いたとき、生徒の画面にも反映されます' : '。この生徒は古い版で提出しているため、生徒の画面には反映されません（生徒に一度開いて提出し直してもらうと、次から反映されます）'}`);
+  } catch (e) { s.picks = JSON.parse(before); toast('保存できませんでした：' + e.message); }
+  STATE.teacher.saving = false; render();
+}
+function tAddResultsHTML(key, q) {
+  q = String(q || '').trim(); if (!q) return '<p class="note">大学名・学部・方式などで探します（例：明治 理工、東洋 共テ）。</p>';
+  const s = STATE.teacher.students.find(x => x.cls + '#' + x.no === key); const have = new Set((s ? s.picks : []).map(p => p.id));
+  const ws = q.split(/\s+/);
+  const hit = M.rows.filter(x => { const t = uniName(x.uni) + x.uni + uniAbbr(x.uni) + x.fac + x.dep + x.met + x.kind; return ws.every(w => t.includes(w)); });
+  if (!hit.length) return '<p class="note">見つかりません。</p>';
+  return `<div class="tbl-wrap"><table class="ex"><tbody>${hit.slice(0, 30).map(x => `<tr><td>${esc(label(x))}</td><td>${esc(x.met)}</td><td><span class="chip k-${esc(x.kind)}">${esc(x.kind)}</span></td><td class="d">${x.date ? fmt(x.date) : '共テのみ'}</td>
+    <td>${have.has(x.id) ? '<span class="note">入っています</span>' : `<button class="btn sm primary" data-tadd="${esc(x.id)}" data-key="${esc(key)}">追加</button>`}</td></tr>`).join('')}</tbody></table></div>${hit.length > 30 ? `<p class="note">ほか${hit.length - 30}件。言葉を足して絞り込んでください。</p>` : ''}`;
+}
 async function loadConfigFile() {
-  try { const r = await fetch(C.CONFIG_URL, { cache: 'no-cache' }); if (!r.ok) return; const j = await r.json(); ['SCHOOL', 'CLASSES', 'FORM_URL', 'TEACHER_PW_HASH', 'MS_CLIENT_ID', 'MS_TENANT_ID', 'FB_API_KEY', 'FB_PROJECT_ID'].forEach(k => { if (j[k] !== undefined && j[k] !== null) C[k] = j[k]; }); } catch (e) { }
+  try { const r = await fetch(C.CONFIG_URL, { cache: 'no-cache' }); if (!r.ok) return; const j = await r.json(); ['SCHOOL', 'CLASSES', 'TEACHER_PW_HASH', 'FB_API_KEY', 'FB_PROJECT_ID'].forEach(k => { if (j[k] !== undefined && j[k] !== null) C[k] = j[k]; }); } catch (e) { }
 }
 const normName = s => String(s || '').replace(/[\s　]+/g, '');
 let toastTimer;
@@ -843,7 +754,7 @@ function pruneEmpty(o) {
 }
 function compactMe(me) {
   return {
-    v: 1, y: M.settings.year, c: me.cls, n: me.no, m: me.name, t: me.updated || '', p: pruneEmpty(me.profile || {}),
+    v: 1, y: M.settings.year, c: me.cls, n: me.no, m: me.name, t: me.updated || '', p: pruneEmpty(me.profile || {}), kk: me.key || undefined, bs: me.backSeen || undefined,
     k: (me.picks || []).map(p => {
       const base = M.byId[p.id]; const r = [p.id, Math.max(0, PREFS.indexOf(p.pref)), Math.max(0, STATUSES.indexOf(p.status))];
       const changed = (p.date || '') !== ((base && base.date) || (p.snap && p.snap.date) || '');
@@ -868,7 +779,7 @@ async function decodeCode(code) {
   const o = JSON.parse(new TextDecoder().decode(bytes));
   const pf = o.p || {}; pf.ext = [0, 1].map(i => (pf.ext && pf.ext[i]) || {});
   return {
-    cls: String(o.c), no: String(o.n), name: String(o.m || ''), updated: o.t || '', year: o.y || '', profile: pf,
+    cls: String(o.c), no: String(o.n), name: String(o.m || ''), updated: o.t || '', year: o.y || '', profile: pf, key: o.kk || '', backSeen: o.bs || '',
     picks: (o.k || []).map(r => {
       const id = r[0]; const base = M.byId[id];
       return { id, date: typeof r[3] === 'string' ? r[3] : (base ? base.date : ''), pref: PREFS[r[1]] || '', status: STATUSES[r[2]] || '', memo: r[4] || '',
@@ -885,14 +796,6 @@ function refreshCode() {
     ['#codeBox', '#codeBoxM'].forEach(sel => { const box = $(sel); if (box) box.value = STATE.code; });
     const st = $('#submitState'); if (st) st.innerHTML = submitStateHTML();
   }, 250);
-}
-function formUrl(me, code) {
-  if (!C.FORM_URL) return '';
-  try {
-    const u = new URL(C.FORM_URL); const map = { CLASS: me.cls, NO: me.no, NAME: me.name, CODE: code };
-    for (const [k, v] of [...u.searchParams]) if (map[v.trim()] !== undefined) u.searchParams.set(k, map[v.trim()]);
-    return u.toString();
-  } catch (e) { return ''; }
 }
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); return true; }
@@ -1012,12 +915,14 @@ function loginHTML() {
     <p style="text-align:right;margin:10px 0 0"><button type="button" class="linkbtn" data-act="tlogin">教員の方はこちら</button></p>
   </form>`;
 }
+function rid(n) { const a = new Uint8Array(n); crypto.getRandomValues(a); return b64u(a); }
 function startStudent(me, msg) {
-  me.profile = me.profile || {}; me.picks = me.picks || [];
+  me.profile = me.profile || {}; me.picks = me.picks || []; if (!me.key) me.key = rid(15);
   me.picks.forEach(p => { p.pref = normPref(p.pref); p.status = normStatus(p.status); });
   STATE.me = me; STATE.view = 'student'; STATE.tab = me.picks.length ? 'plan' : 'uni'; STATE.newConfirm = false;
   STATE.saveState = storeMe() ? 'saved' : 'error';
   render(); window.scrollTo({ top: 0 }); if (msg) toast(msg);
+  fbCheckBack();
 }
 function doLogin(e) {
   e.preventDefault();
@@ -1143,13 +1048,14 @@ function planHTML() {
     ${kyo.length ? kyo.map(p => pickHTML(p, ps)).join('') : `<div class="empty">共テ利用はまだありません。<button class="linkbtn" data-tab="kyo">共テ利用タブ</button>から追加できます。</div>`}`
     : `<div class="empty"><b>まだ受験校がありません。</b><br>「<button class="linkbtn" data-tab="uni">大学から追加</button>」か「<button class="linkbtn" data-tab="cal">カレンダーから追加</button>」で選んでください。</div>`;
   const toggle = all.length ? `<div class="filters" style="margin-bottom:6px"><button class="fchip" data-pview="list" aria-pressed="${STATE.planView === 'list'}">リスト</button><button class="fchip" data-pview="cal" aria-pressed="${STATE.planView === 'cal'}">カレンダー</button></div>` : '';
-  const main = STATE.planView === 'cal' && all.length ? `${legendHTML()}${planCalHTML(ps)}` : list;
+  const back = me.backMsg ? `<div class="notice info" style="display:flex;gap:10px;align-items:center"><span style="flex:1">${esc(me.backMsg)}</span><button class="btn sm" data-act="backok">確認しました</button></div>` : '';
+  const main = back + (STATE.planView === 'cal' && all.length ? `${legendHTML()}${planCalHTML(ps)}` : list);
   return `<div class="plan"><div style="min-width:0">${toggle}${main}</div>
     <aside class="side">
       <div class="panel export" id="submitPanel"><h3>先生に提出</h3>
         <div id="submitState" style="font-size:13px">${submitStateHTML()}</div>
-        <button class="btn primary" data-act="submit">${fbReady() ? '先生に提出する' : C.FORM_URL ? 'フォームで提出する' : '提出用コードをコピー'}</button>
-        <p class="note" style="margin:0">${fbReady() ? '押すとすぐ先生に届きます。内容を変えたら、もう一度押してください。' : C.FORM_URL ? 'フォームが開いて入力済みになっています。最後にフォームの「送信」を押してください。' : 'コピーしたコードを、先生の指示した場所（Classroomなど）に貼って提出してください。'}</p>
+        <button class="btn primary" data-act="submit">先生に提出する</button>
+        <p class="note" style="margin:0">押すとすぐ先生に届きます。内容を変えたら、もう一度押してください。</p>
         <details><summary style="cursor:pointer;font-size:13px">復元コード（バックアップ）</summary>
           <textarea id="codeBox" class="inp num" rows="4" readonly style="font-size:11px;margin-top:6px;word-break:break-all">${esc(STATE.code)}</textarea>
           <button class="btn sm" data-act="copycode" style="margin-top:6px">コピー</button>
@@ -1537,86 +1443,17 @@ async function doTLogin(e) {
   try { sessionStorage.setItem(TOK_KEY, h); } catch (ex) { }
   STATE.view = 'teacher'; render();
 }
-/* ---------- 回答Excelをこのパソコンで覚えておく（Chrome・Edge）。OneDriveで同期しているファイルなら、読むたびに最新 ---------- */
-const canRemember = () => !!window.showOpenFilePicker;
-function idb() { return new Promise((res, rej) => { const r = indexedDB.open('jukenko_planner', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
-async function kvGet(k) { try { const db = await idb(); return await new Promise(res => { const q = db.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => res(null); }); } catch (e) { return null; } }
-async function kvSet(k, v) { try { const db = await idb(); await new Promise(res => { const tx = db.transaction('kv', 'readwrite'); if (v === null) tx.objectStore('kv').delete(k); else tx.objectStore('kv').put(v, k); tx.oncomplete = res; tx.onerror = res; }); } catch (e) { } }
-async function lfPick() {
-  let h;
-  try { [h] = await window.showOpenFilePicker({ types: [{ description: 'Excel', accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } }], multiple: false }); }
-  catch (e) { return; }
-  await kvSet('respFile', h); STATE.teacher.lf = { name: h.name, handle: h }; await lfRead(true);
-}
-async function lfRead(interactive) {
-  const t = STATE.teacher; const lf = t.lf; if (!lf || !lf.handle || lf.busy) return;
-  lf.busy = true;
-  try {
-    let p = await lf.handle.queryPermission({ mode: 'read' });
-    if (p !== 'granted') {
-      if (!interactive) { lf.need = true; lf.busy = false; if (STATE.view === 'teacher') render(); return; }
-      p = await lf.handle.requestPermission({ mode: 'read' });
-      if (p !== 'granted') throw new Error('ファイルを読む許可がありませんでした');
-    }
-    const file = await lf.handle.getFile();
-    const r = await importTexts(wbTexts(XLSX.read(await file.arrayBuffer(), { type: 'array' })), true);
-    Object.assign(lf, { need: false, err: '', at: new Date().toTimeString().slice(0, 5), mod: file.lastModified, summary: r });
-  } catch (e) { lf.err = e && e.name === 'NotFoundError' ? 'ファイルが見つかりません（移動・名前の変更をしていないか確認してください）。もう一度「Excelを選ぶ」から選んでください' : (e.message || String(e)); }
-  lf.busy = false;
-  if (STATE.view === 'teacher') render();
-}
-let lfTimer = null;
-async function lfInit() {
-  const t = STATE.teacher; if (t.lfInit || !canRemember()) return; t.lfInit = true;
-  const h = await kvGet('respFile');
-  if (h && !t.lf) { t.lf = { name: h.name, handle: h }; await lfRead(false); }
-  if (!lfTimer) lfTimer = setInterval(() => { const lf = STATE.teacher.lf; if (STATE.view === 'teacher' && document.visibilityState === 'visible' && lf && !lf.need && !lf.err) lfRead(false); }, 5 * 60e3);
-}
-function lfStatusHTML() {
-  const lf = STATE.teacher.lf; if (!lf) return '';
-  if (lf.busy) return '<span class="note">読み込んでいます…</span>';
-  if (lf.err) return `<span class="w bad">${esc(lf.err)}</span>`;
-  if (lf.need) return '<span class="note">「最新を読み込む」を押すと、前回選んだExcelを読み込みます（ブラウザが許可を確認します）。</span>';
-  if (lf.at) return `<span class="okmsg">${esc(lf.at)} に読み込みました。</span><span class="note">${esc(lf.summary || '')}　開いている間は5分ごとに読み直します。${lf.mod ? `　Excelの最終更新 ${esc(new Date(lf.mod).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}` : ''}</span>`;
-  return '';
-}
 function importPanelHTML() {
-  const t = STATE.teacher; const lf = t.lf; const msOn = msReady() && msFile();
-  const pickBtn = (primary) => canRemember()
-    ? `<button class="btn${primary ? ' primary' : ''}" data-act="lf-pick">${lf ? '別のExcelを選ぶ' : 'Excelを選ぶ'}</button>`
-    : `<label class="btn${primary ? ' primary' : ''}" style="cursor:pointer">Excelを選ぶ<input type="file" id="imp-files" accept=".xlsx,.xls,.csv,.txt" multiple hidden></label>`;
-  const fa = fbReady() && fbAuth();
-  if (fbReady()) {
-    const top = fa
-      ? `<div class="tools" style="margin:0;align-items:center"><span class="livedot">●</span><b>提出を自動で受け取っています</b><button class="btn sm" data-act="fb-pull">今すぐ受け取る</button><span class="note">${esc(fa.email)}</span><button class="btn sm ghost" data-act="fb-logout">ログアウト</button></div>
-         <div id="fbStatus" style="margin-top:6px">${fbStatusHTML()}</div>`
-      : `<form id="fbLogin" class="tools" style="margin:0;align-items:center" autocomplete="on"><input id="fb-email" class="inp" type="email" autocomplete="username" placeholder="先生用ログインのメール" style="flex:1 1 200px"><input id="fb-pw" class="inp" type="password" autocomplete="current-password" placeholder="パスワード" style="flex:1 1 140px">
-         <label style="font-size:13px"><input type="checkbox" id="fb-remember" checked> このパソコンで覚える</label><button class="btn primary" type="submit">ログインして受け取る</button></form>
-         ${(STATE.teacher.fb || {}).err ? `<div style="margin-top:6px">${fbStatusHTML()}</div>` : '<p class="note" style="margin:6px 0 0">生徒が「先生に提出」を押した内容を、ここで自動で受け取ります。最初だけ先生用のログインが必要です。</p>'}`;
-    return `<section class="panel imp" style="margin-bottom:14px"><h3>提出データ</h3>${top}
-    <details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px;color:var(--muted)">ほかの読み込み方（Formsの回答Excel・貼り付け）</summary><div style="margin-top:8px">
-      <div class="tools" style="margin:0 0 8px">${pickBtn(false)}${lf ? `<button class="btn" data-act="lf-read">最新を読み込む（${esc(lf.name)}）</button>` : ''}</div>${lf ? lfStatusHTML() : ''}
-      <textarea id="imp-text" class="inp" rows="3" placeholder="コードを貼ったメールなどを、ここに貼り付け"></textarea>
-      <div class="tools" style="margin:6px 0 0"><button class="btn" data-act="imp-go">貼り付けた内容を読み込む</button><button class="btn ghost" data-act="imp-clear">読み込んだデータを消す</button></div>
-    </div></details>
-    <p class="note" style="margin:8px 0 0">${t.students.length}人分を表示中。</p></section>`;
-  }
-  const main = msOn
-    ? `<button class="btn primary" data-act="ms-pull">Formsから最新を読み込む</button>${pickBtn(false)}`
-    : lf ? `<button class="btn primary" data-act="lf-read">最新を読み込む</button><span class="note">${esc(lf.name)}</span>${pickBtn(false)}`
-    : pickBtn(true);
-  const status = msOn ? `<div id="msStatus">${msStatusHTML()}</div>` : lf ? lfStatusHTML() : (t.imp ? `<span class="note">${esc(t.imp)}</span>` : '');
-  return `<section class="panel imp" style="margin-bottom:14px"><h3>提出データ（Formsの回答Excel）</h3>
-    <div class="tools" style="margin:0;align-items:center">${main}</div>
-    ${status ? `<div style="margin-top:6px">${status}</div>` : ''}
-    ${!msOn && !lf ? `<p class="note" style="margin:6px 0 0">Formsの「回答」→「Excelで開く」で保存したExcelを選びます。${canRemember() ? '選んだExcelはこのパソコンで覚えるので、次からは「最新を読み込む」を押すだけです。OneDriveで同期しているフォルダのExcelを選べば、いつも最新の回答が読めます。' : ''}</p>` : ''}
-    <details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px;color:var(--muted)">ほかの読み込み方・設定</summary><div style="margin-top:8px">
-      <p style="margin:0 0 6px;font-size:13px"><b>貼り付けで読み込む</b>：コードを貼ったメール・Classroomの画面をまとめてコピーしたものを貼ります。中から JKP… のコードだけを拾い、同じ生徒は新しいものを使います。</p>
-      <textarea id="imp-text" class="inp" rows="3" placeholder="ここに貼り付け（何人分でも、前後に文章が混ざっていてもOK）"></textarea>
-      <div class="tools" style="margin:6px 0 10px"><button class="btn" data-act="imp-go">貼り付けた内容を読み込む</button>${lf ? '<button class="btn ghost" data-act="lf-forget">選んだExcelを忘れる</button>' : ''}<button class="btn ghost" data-act="imp-clear">読み込んだデータを消す</button></div>
-      ${msReady() ? `<p style="margin:0 0 6px;font-size:13px"><b>Microsoft 365から自動で読み込む</b>（学校の設定で許可されている場合）</p>${msPanelHTML()}` : ''}
-    </div></details>
-    <p class="note" style="margin:8px 0 0">${t.students.length}人分を表示中。データはこの画面にだけあり、閉じると消えます。</p></section>`;
+  const t = STATE.teacher;
+  if (!fbReady()) return `<section class="panel imp" style="margin-bottom:14px"><h3>提出データ</h3><p style="margin:0">提出の受け取り（Firebase）がまだ設定されていません。「システム設定」の「Firebaseの準備」から設定してください。</p></section>`;
+  const fa = fbAuth();
+  const top = fa
+    ? `<div class="tools" style="margin:0;align-items:center"><span class="livedot">●</span><b>提出を自動で受け取っています</b><button class="btn sm" data-act="fb-pull">今すぐ受け取る</button><span class="note">${esc(fa.email)}</span><button class="btn sm ghost" data-act="fb-logout">ログアウト</button></div>
+       <div id="fbStatus" style="margin-top:6px">${fbStatusHTML()}</div>`
+    : `<form id="fbLogin" class="tools" style="margin:0;align-items:center" autocomplete="on"><input id="fb-email" class="inp" type="email" autocomplete="username" placeholder="先生用ログインのメール" style="flex:1 1 200px"><input id="fb-pw" class="inp" type="password" autocomplete="current-password" placeholder="パスワード" style="flex:1 1 140px">
+       <label style="font-size:13px"><input type="checkbox" id="fb-remember" checked> このパソコンで覚える</label><button class="btn primary" type="submit">ログインして受け取る</button></form>
+       ${(t.fb || {}).err ? `<div style="margin-top:6px">${fbStatusHTML()}</div>` : '<p class="note" style="margin:6px 0 0">生徒が「先生に提出」を押した内容を、ここで自動で受け取ります。最初だけ先生用のログインが必要です。</p>'}`;
+  return `<section class="panel imp" style="margin-bottom:14px"><h3>提出データ</h3>${top}<p class="note" style="margin:8px 0 0">${t.students.length}人分を表示中。</p></section>`;
 }
 async function importTexts(texts, quiet) {
   const t = STATE.teacher; const codes = new Set();
@@ -1635,14 +1472,6 @@ async function importTexts(texts, quiet) {
   t.imp = codes.size ? `コード${codes.size}件を読み取り、${t.students.length}人分を表示しています。${older ? `同じ生徒の古いコード${older}件は新しいもので置き換えました。` : ''}${oldYear ? `ほかの年度のコード${oldYear}件は除きました。` : ''}${bad ? `読めなかったコード${bad}件（途中で切れている可能性があります）。` : ''}` : 'コード（JKP… で始まる文字）が見つかりませんでした。';
   if (quiet) return `提出${codes.size - oldYear}件・${t.students.length}人分。${bad ? `読めなかったコード${bad}件。` : ''}`;
   render();
-}
-async function importFiles(files) {
-  const texts = [];
-  for (const f of files) {
-    if (/\.(xlsx|xls)$/i.test(f.name)) texts.push(...wbTexts(XLSX.read(await f.arrayBuffer(), { type: 'array' })));
-    else texts.push(await f.text());
-  }
-  importTexts(texts);
 }
 function tFiltered() {
   const t = STATE.teacher; const q = t.q.trim();
@@ -1681,9 +1510,13 @@ function tDetailHTML(key) {
     <div class="uhead"><button class="btn sm" data-act="closedetail">閉じる</button><h2>${esc(clsL(s.cls))} ${esc(s.no)}番 ${esc(s.name)}</h2><button class="btn sm primary" data-act="tprint1" data-key="${esc(key)}">PDF</button></div>
     <div class="panel" style="margin-bottom:12px;font-size:14px"><div>英検：${esc(pf.eiken || '—')} ${pf.cse ? `CSE ${esc(pf.cse)}` : ''} ${(pf.ext || []).filter(e => e.type).map(e => esc(e.type + ' ' + (e.score || ''))).join('、')}</div>
       <div>${kyoTotalText(pf)}（共テ${pf.kyoTake === false ? '受験しない' : '受験する'}）</div><div>第1志望：${esc(pf.hope1 || '—')}　系統：${esc(pf.field || '—')}</div>${(pf.subj || []).length ? `<div>受験科目：${esc(subjNames(pf.subj))}</div>` : ''}${pf.memo ? `<div class="notice info" style="margin-bottom:0">生徒から：${esc(pf.memo)}</div>` : ''}</div>
-    <div class="tbl-wrap"><table class="ex"><thead><tr><th>試験日</th><th>大学・学部・学科</th><th>方式</th><th>出願締切</th><th>発表</th><th>手続</th><th>位置づけ</th><th>結果</th><th>メモ</th></tr></thead><tbody>
-    ${ps.map(p => { const x = exOf(p); const w = warningsFor(p, ps.filter(q => q.status !== '取りやめ')).filter(w => w.bad); return `<tr><td class="d">${x.kind === '共テ利用' ? '共テ利用' : fmt(x.date)}</td><td>${esc(label(x))}${w.length ? `<div class="w bad">${esc(w.map(z => z.t).join(' / '))}</div>` : ''}</td><td>${esc(x.met)}${subjText(x) || borderText(x) ? `<div class="note">${esc([borderText(x), subjText(x)].filter(Boolean).join('／'))}</div>` : ''}</td><td class="d">${fmt(x.close)}</td><td class="d">${fmt(x.ann)}</td><td class="d">${fmt(x.proc)}</td><td>${esc(p.pref || '—')}</td><td>${esc(p.status || '—')}</td><td>${esc(p.memo || '')}</td></tr>`; }).join('') || '<tr><td colspan="9">未登録</td></tr>'}
+    <div class="tbl-wrap"><table class="ex"><thead><tr><th>試験日</th><th>大学・学部・学科</th><th>方式</th><th>出願締切</th><th>発表</th><th>手続</th><th>位置づけ</th><th>結果</th><th>メモ</th><th></th></tr></thead><tbody>
+    ${ps.map(p => { const x = exOf(p); const w = warningsFor(p, ps.filter(q => q.status !== '取りやめ')).filter(w => w.bad); return `<tr><td class="d">${x.kind === '共テ利用' ? '共テ利用' : fmt(x.date)}</td><td>${esc(label(x))}${w.length ? `<div class="w bad">${esc(w.map(z => z.t).join(' / '))}</div>` : ''}</td><td>${esc(x.met)}${subjText(x) || borderText(x) ? `<div class="note">${esc([borderText(x), subjText(x)].filter(Boolean).join('／'))}</div>` : ''}</td><td class="d">${fmt(x.close)}</td><td class="d">${fmt(x.ann)}</td><td class="d">${fmt(x.proc)}</td><td>${esc(p.pref || '—')}</td><td>${esc(p.status || '—')}</td><td>${esc(p.memo || '')}</td><td>${fbReady() ? `<button class="btn sm ghost danger" data-tdel="${esc(p.id)}" data-key="${esc(key)}"${STATE.teacher.saving ? ' disabled' : ''}>削除</button>` : ''}</td></tr>`; }).join('') || '<tr><td colspan="10">未登録</td></tr>'}
     </tbody></table></div>
+    ${fbReady() ? `<details class="panel" style="margin-top:12px"${STATE.teacher.addq ? ' open' : ''}><summary style="cursor:pointer;font-weight:700">受験校を追加する</summary>
+      <input id="t-addq" class="inp" data-key="${esc(key)}" placeholder="大学名・学部・方式で探す（例：明治 理工）" value="${esc(STATE.teacher.addq || '')}" style="margin-top:8px">
+      <div id="t-addres" style="margin-top:8px">${tAddResultsHTML(key, STATE.teacher.addq)}</div>
+      <p class="note" style="margin-bottom:0">追加・削除はすぐ保存され、生徒が次にページを開いたとき、生徒の画面にも反映されます。</p></details>` : ''}
     <div class="tools" style="margin-top:14px"><button class="btn primary" data-act="ai-copy" data-key="${esc(key)}">生徒の情報をコピー（AI相談用）</button></div></div></div>`;
 }
 /* ============================================================
@@ -1776,17 +1609,9 @@ function tDataHTML() {
   const settings = `<section class="panel"><h3>基本設定</h3>
       <div class="field"><label for="cfg-school">学校名（画面とPDFに表示）</label><input id="cfg-school" class="inp" value="${esc(C.SCHOOL || '')}"></div>
       <div class="field"><label for="cfg-classes">組の選択肢（カンマ区切り。空欄なら生徒が自由入力）</label><input id="cfg-classes" class="inp" value="${esc((C.CLASSES || []).join(','))}" placeholder="A,B,C,D,E,F,G,H"></div>
-      <div class="field"><label for="cfg-form">提出先：Microsoft Formsの事前入力リンク</label><textarea id="cfg-form" class="inp" rows="3" style="font-size:12px;word-break:break-all">${esc(C.FORM_URL || '')}</textarea></div>
-      <details style="font-size:13px;margin-bottom:10px"><summary style="cursor:pointer">Formsのリンクの作り方</summary>
-        <ol style="padding-left:1.3em;line-height:1.8;margin:6px 0">
-          <li>Formsで「組」「番号」「氏名」「提出コード」の4つの質問（テキスト）を作る。提出コードは「長い回答」をオン</li>
-          <li>設定で「すべてのユーザーが回答可能」にする</li>
-          <li>「…」→「事前入力済みリンクを取得」で、組に <b>CLASS</b>、番号に <b>NO</b>、氏名に <b>NAME</b>、提出コードに <b>CODE</b> と入れてリンクを作る</li>
-          <li>できたリンクを上の欄に貼る。年度が変わっても、回答を削除すれば同じフォームを使い続けられます</li>
-        </ol></details>
       <div class="field"><label>提出の受け取り：Firebase（Google）</label>
         <div class="row2"><input id="cfg-fbk" class="inp num" placeholder="apiKey（AIza…）" value="${esc(C.FB_API_KEY || '')}"><input id="cfg-fbp" class="inp num" placeholder="projectId" value="${esc(C.FB_PROJECT_ID || '')}"></div>
-        <p class="note" style="margin:4px 0 0">${fbReady() ? '✓ 設定済み：生徒の「先生に提出」は Firebase に届きます（Formsは使いません）。' : '空欄のときは、上のFormsで提出します。'}</p></div>
+        <p class="note" style="margin:4px 0 0">${fbReady() ? '✓ 設定済み：生徒の「先生に提出」は Firebase に届きます。' : '未設定です。下の手順で準備してください（設定するまで、生徒は提出できません）。'}</p></div>
       <details style="font-size:13px;margin-bottom:10px"><summary style="cursor:pointer">Firebaseの準備（最初に1回だけ・15分ほど）</summary>
         <ol style="padding-left:1.3em;line-height:1.8;margin:6px 0">
           <li>Googleアカウントで <b>https://console.firebase.google.com</b> を開き、「プロジェクトを作成」。名前は例：jukenko-planner。Googleアナリティクスはオフでよい</li>
@@ -1801,18 +1626,6 @@ function tDataHTML() {
         <div class="tools" style="margin-top:6px"><button class="btn sm" data-act="fb-rules-copy">ルールをコピー</button></div>
         <p style="margin:4px 0 0">先生用ログインを複数作るときは、ルールの ['…'] の中に 'a@x', 'b@x' のようにカンマで並べます。このアカウントの持ち主の名前は、生徒にも先生にも表示されません。</p>
         ${fbReady() ? '<div class="tools" style="margin-top:8px"><button class="btn sm ghost danger" data-act="fb-clean">今年度以外の提出データを削除</button></div>' : ''}</details>
-      <div class="field"><label>Microsoft 365 連携（Formsの回答を自動で読み込む・任意）</label>
-        <div class="row2"><input id="cfg-msc" class="inp num" placeholder="アプリケーション（クライアント）ID" value="${esc(C.MS_CLIENT_ID || '')}"><input id="cfg-mst" class="inp num" placeholder="ディレクトリ（テナント）ID" value="${esc(C.MS_TENANT_ID || '')}"></div></div>
-      <details style="font-size:13px;margin-bottom:10px"><summary style="cursor:pointer">2つのIDの取り方（学校で最初に1回だけ）</summary>
-        <ol style="padding-left:1.3em;line-height:1.8;margin:6px 0">
-          <li>学校のMicrosoftアカウントで <b>https://entra.microsoft.com</b> を開く</li>
-          <li>「アプリケーション」→「アプリの登録」→「新規登録」。名前は「受験校プランナー」、アカウントの種類は「この組織ディレクトリのみ」</li>
-          <li>リダイレクトURIは、種類を「<b>シングルページ アプリケーション（SPA）</b>」にして <b>${esc(msRedirect())}</b></li>
-          <li>「登録」を押し、概要に出る「アプリケーション（クライアント）ID」と「ディレクトリ（テナント）ID」を上の2つの欄に貼る</li>
-          <li>「APIのアクセス許可」→「アクセス許可の追加」→「Microsoft Graph」→「委任されたアクセス許可」で <b>Files.Read.All</b> を追加</li>
-          <li>「設定を保存して公開」を押す。そのあと「生徒一覧」タブで回答Excelを選ぶ（パソコンごとに1回）</li>
-        </ol>
-        <p style="margin:4px 0 0">「アプリの登録」に入れない、またはサインイン時に「管理者の承認が必要」と出る場合は、情報担当の先生に上の手順（と「管理者の同意を与える」）を依頼してください。この登録は学校に属するので、担当が変わっても消えません。</p></details>
       <div class="field"><label for="cfg-pw">教員パスワードを変える（変えないときは空欄）</label><input id="cfg-pw" class="inp" type="password" autocomplete="new-password"></div>
       <div class="tools"><button class="btn primary" data-act="cfg-save"${tok ? '' : ' disabled'}>設定を保存して公開</button>${tok ? '' : '<span class="note">このパソコンから公開できる状態になると押せます（上の表示を確認）。</span>'}</div>
       ${sys.cfgMsg ? `<p class="notice ${sys.cfgOk ? 'info' : ''}">${esc(sys.cfgMsg)}</p>` : ''}
@@ -2003,7 +1816,7 @@ async function convertKeinet(files) {
    イベント
    ============================================================ */
 function afterRender() {
-  renderSave(); msAuto(); fbAuto(); if (STATE.view === 'teacher' && isTeacherOk()) lfInit();
+  renderSave(); fbAuto();
   const fl = $('#fbLogin'); if (fl) fl.addEventListener('submit', async ev => {
     ev.preventDefault(); const b = $('button[type=submit]', fl); b.disabled = true; b.textContent = 'ログインしています…';
     try { await fbSignIn($('#fb-email').value.trim(), $('#fb-pw').value, $('#fb-remember').checked); STATE.teacher.fb = null; STATE.teacher.fbAutoDone = true; render(); await fbPull(); }
@@ -2056,8 +1869,9 @@ document.addEventListener('click', async e => {
   if (d.ics) { STATE.icsTypes[t.checked ? 'add' : 'delete'](d.ics); return; }
   if (d.ttab) { STATE.teacher.tab = d.ttab; render(); return; }
   if (d.sel) { STATE.teacher.sel[t.checked ? 'add' : 'delete'](d.sel); const b = $('[data-act="tprint"]'); if (b) b.textContent = `選んだ生徒の受験校一覧PDF・1人1枚（${STATE.teacher.sel.size}人）`; return; }
-  if (d.detail) { STATE.teacher.detail = d.detail; render(); return; }
-  if (d.msitem !== undefined) { const pk = STATE.teacher.msPick || {}; const it = (pk.list || [])[+d.msitem]; if (it) { try { msSetFile(it); STATE.teacher.msPick = null; STATE.teacher.ms = null; render(); await msPull(true); } catch (ex) { pk.err = ex.message; render(); } } return; }
+  if (d.detail) { STATE.teacher.detail = d.detail; STATE.teacher.addq = ''; render(); return; }
+  if (d.tdel) { const x = M.byId[d.tdel]; if (!confirm(`${x ? label(x, true) + ' ' + x.met : 'この入試'} を削除しますか？`)) return; await tEdit(d.key, 'del', d.tdel); return; }
+  if (d.tadd) { await tEdit(d.key, 'add', d.tadd); return; }
   const act = d.act; if (!act) return;
   const pickEl = t.closest('.pick'); const pi = pickEl ? +pickEl.dataset.i : -1;
   switch (act) {
@@ -2074,17 +1888,13 @@ document.addEventListener('click', async e => {
     case 'submit': {
       STATE.code = await encodeCode(STATE.me);
       if (!STATE.me.picks.length) { toast('先に受験校を追加してください'); break; }
-      if (fbReady()) {
-        try { t.disabled = true; await fbSubmit(STATE.me, STATE.code); STATE.me.submittedAt = STATE.me.updated; storeMe(); toast('提出しました。先生に届いています'); }
-        catch (ex) { toast(ex.message + '。時間をおいてもう一度押してください'); }
-        t.disabled = false; const st0 = $('#submitState'); if (st0) st0.innerHTML = submitStateHTML(); break;
-      }
-      const url = formUrl(STATE.me, STATE.code);
-      if (url) { STATE.me.submittedAt = STATE.me.updated; storeMe(); window.open(url, '_blank'); }
-      else { const ok = await copyText(STATE.code); STATE.me.submittedAt = STATE.me.updated; storeMe(); toast(ok ? '提出用コードをコピーしました。先生の指示した場所に貼ってください' : '下の復元コードを選んでコピーしてください'); if (STATE.tab !== 'plan') { STATE.tab = 'plan'; render(); } }
-      const st = $('#submitState'); if (st) st.innerHTML = submitStateHTML();
+      if (!fbReady()) { toast('提出の受け取りがまだ設定されていません。先生に伝えてください'); break; }
+      try { t.disabled = true; await fbSubmit(STATE.me, STATE.code); STATE.me.submittedAt = STATE.me.updated; storeMe(); toast('提出しました。先生に届いています'); }
+      catch (ex) { toast(ex.message + '。時間をおいてもう一度押してください'); }
+      t.disabled = false; const st = $('#submitState'); if (st) st.innerHTML = submitStateHTML();
       break;
     }
+    case 'backok': if (STATE.me) { delete STATE.me.backMsg; storeMe(); rerenderTab(); } break;
     case 'codeopen': STATE.code = await encodeCode(STATE.me); STATE.codeOpen = true; render(); break;
     case 'codeclose': if (e.target === t || t.matches('button')) { STATE.codeOpen = false; render(); } break;
     case 'sharecode': { STATE.code = await encodeCode(STATE.me); try { await navigator.share({ title: '受験校プランナーの復元コード', text: STATE.code }); } catch (ex) { } break; }
@@ -2101,12 +1911,9 @@ document.addEventListener('click', async e => {
     }
     case 'cfg-save': {
       const sys = STATE.teacher.sys = STATE.teacher.sys || {};
-      const cfg = { SCHOOL: $('#cfg-school').value.trim(), CLASSES: $('#cfg-classes').value.split(/[,、，\s]+/).map(x => x.trim()).filter(Boolean), FORM_URL: $('#cfg-form').value.trim(), TEACHER_PW_HASH: C.TEACHER_PW_HASH, MS_CLIENT_ID: $('#cfg-msc').value.trim(), MS_TENANT_ID: $('#cfg-mst').value.trim(), FB_API_KEY: $('#cfg-fbk').value.trim(), FB_PROJECT_ID: $('#cfg-fbp').value.trim(), updated: nowStr() };
+      const cfg = { SCHOOL: $('#cfg-school').value.trim(), CLASSES: $('#cfg-classes').value.split(/[,、，\s]+/).map(x => x.trim()).filter(Boolean), TEACHER_PW_HASH: C.TEACHER_PW_HASH, FB_API_KEY: $('#cfg-fbk').value.trim(), FB_PROJECT_ID: $('#cfg-fbp').value.trim(), updated: nowStr() };
       if ((cfg.FB_API_KEY || cfg.FB_PROJECT_ID) && !(/^AIza[\w-]{30,}$/.test(cfg.FB_API_KEY) && /^[a-z0-9-]{4,40}$/.test(cfg.FB_PROJECT_ID))) { sys.cfgOk = false; sys.cfgMsg = 'Firebaseの apiKey（AIza で始まる文字）と projectId（英小文字・数字・ハイフン）を、両方とも正しく入れてください。'; render(); break; }
-      const guid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-      if ((cfg.MS_CLIENT_ID || cfg.MS_TENANT_ID) && !(guid.test(cfg.MS_CLIENT_ID) && guid.test(cfg.MS_TENANT_ID))) { sys.cfgOk = false; sys.cfgMsg = 'Microsoft 365 連携の2つのIDは、xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx の形で、両方とも入れてください。'; render(); break; }
       const pw = $('#cfg-pw').value; if (pw) cfg.TEACHER_PW_HASH = await sha256('jukenko-teacher:' + pw);
-      if (cfg.FORM_URL && !/CODE/.test(cfg.FORM_URL)) { sys.cfgOk = false; sys.cfgMsg = 'FormsのリンクにCODEが入っていません。提出コードの欄に CODE と入れて事前入力リンクを作り直してください。'; render(); break; }
       try {
         await ghPutFile('data/config.json', btoa(unescape(encodeURIComponent(JSON.stringify(cfg, null, 2)))), 'システム設定を更新');
         Object.assign(C, cfg); try { sessionStorage.setItem(TOK_KEY, C.TEACHER_PW_HASH); } catch (ex) { }
@@ -2122,7 +1929,6 @@ document.addEventListener('click', async e => {
     case 'gh-clear': { try { localStorage.removeItem(GH_KEY); localStorage.removeItem(GH_DATE_KEY); } catch (ex) { } STATE.teacher.sys = {}; STATE.teacher.gh = { st: 'none' }; render(); toast('合鍵の登録を消しました'); break; }
     case 'gh-recheck': STATE.teacher.gh = { st: 'checking' }; render(); await checkGh(); render(); break;
     case 'chk-preview': if (STATE.teacher.chk && STATE.teacher.chk.wb) { ingestWorkbook(STATE.teacher.chk.wb); STATE.preview = true; render(); toast('この端末だけ、チェックしたデータで表示しています'); } break;
-    case 'ms-pull': await msPull(true); break;
     case 'fb-pull': await fbPull(); break;
     case 'fb-logout': fbLogout(); STATE.teacher.fb = null; STATE.teacher.fbAutoDone = false; render(); break;
     case 'fb-rules-copy': { const ok = await copyText(fbRules(($('#fb-rule-email') || {}).value)); toast(ok ? 'ルールをコピーしました。Firebaseの「ルール」に貼り替えて「公開」を押してください' : 'コピーできませんでした'); break; }
@@ -2132,16 +1938,6 @@ document.addEventListener('click', async e => {
       try { const docs = await fbQuery('NOT_EQUAL', M.settings.year); const n = await fbDelete(docs.map(d => d.name)); toast(`${n}件削除しました`); } catch (ex) { toast(ex.message); }
       break;
     }
-    case 'ms-forget': try { localStorage.removeItem(MS_FILE_KEY); } catch (ex) { } STATE.teacher.ms = null; render(); break;
-    case 'lf-pick': await lfPick(); break;
-    case 'lf-read': await lfRead(true); break;
-    case 'lf-forget': await kvSet('respFile', null); STATE.teacher.lf = null; render(); break;
-    case 'ms-pickopen': STATE.teacher.msPick = {}; render(); break;
-    case 'ms-pickcancel': STATE.teacher.msPick = null; render(); break;
-    case 'ms-link': { const pk = STATE.teacher.msPick = STATE.teacher.msPick || {}; try { await msPickByLink(($('#ms-link') || {}).value); STATE.teacher.msPick = null; STATE.teacher.ms = null; render(); await msPull(true); } catch (ex) { pk.err = ex.message; render(); } break; }
-    case 'ms-recent': { const pk = STATE.teacher.msPick = STATE.teacher.msPick || {}; pk.err = ''; try { pk.list = await msRecent(); } catch (ex) { pk.err = ex.message; } render(); break; }
-    case 'imp-go': importTexts([($('#imp-text') || {}).value || '']); break;
-    case 'imp-clear': try { sessionStorage.removeItem(T_KEY); } catch (ex) { } STATE.teacher.students = []; STATE.teacher.sel = new Set(); STATE.teacher.imp = ''; render(); break;
     case 'del': if (pi >= 0) { STATE.me.picks.splice(pi, 1); touch(); rerenderTab(); refreshCounts(); } break;
     case 'uniback': STATE.search.uni = ''; rerenderTab(); break;
     case 'kyoback': STATE.kyo.uni = ''; rerenderTab(); break;
@@ -2173,6 +1969,7 @@ function onInput(t, composing) {
   if (t.id === 'k-fq') { STATE.kyo.fq = t.value; clearTimeout(t._tm); t._tm = setTimeout(() => keepFocus('k-fq', rerenderTab), 250); return; }
   if (t.id === 'c-q') { STATE.cal.q = t.value; clearTimeout(t._tm); t._tm = setTimeout(() => keepFocus('c-q', rerenderTab), 250); return; }
   if (t.id === 't-q') { STATE.teacher.q = t.value; keepFocus('t-q', render); return; }
+  if (t.id === 't-addq') { STATE.teacher.addq = t.value; const el = $('#t-addres'); if (el) el.innerHTML = tAddResultsHTML(t.dataset.key, t.value); return; }
   if (t.id === 'fb-rule-email') { const r = $('#fb-rules'); if (r) r.value = fbRules(t.value); return; }
   if (t.id === 'ai-template') { const a = loadAI(); a.template = t.value; saveAI(a); return; }
   if (!STATE.me) return;
@@ -2194,7 +1991,6 @@ document.addEventListener('change', e => {
   if (t.dataset.ai) { const a = loadAI(); a[t.dataset.ai] = t.type === 'checkbox' ? t.checked : t.value; saveAI(a); return; }
   if (t.id === 'chk-file' && t.files.length) { checkFile(t.files[0]); return; }
   if (t.id === 'kn-files' && t.files.length) { convertKeinet([...t.files]); return; }
-  if (t.id === 'imp-files' && t.files.length) { importFiles([...t.files]); return; }
   if (!STATE.me) return;
   if (d.p && t.tagName === 'SELECT') { STATE.me.profile[d.p] = t.value; touch(); return; }
   if (d.ext !== undefined && t.tagName === 'SELECT') { const pf = STATE.me.profile; pf.ext = pf.ext || [{}, {}]; pf.ext[+d.ext] = pf.ext[+d.ext] || {}; pf.ext[+d.ext].type = t.value; touch(); return; }
@@ -2205,6 +2001,7 @@ document.addEventListener('change', e => {
   }
 });
 
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && STATE.view === 'student') fbCheckBack(); });
 let lastNarrow = null;
 window.addEventListener('resize', () => { const n = isNarrow(); if (lastNarrow !== null && n !== lastNarrow && STATE.view === 'student' && ['cal', 'plan'].includes(STATE.tab)) rerenderTab(); lastNarrow = n; });
 
@@ -2213,12 +2010,10 @@ window.addEventListener('resize', () => { const n = isNarrow(); if (lastNarrow !
    ============================================================ */
 (async function boot() {
   const app = $('#app');
-  if (msHandleReturn()) return;
   if (typeof XLSX === 'undefined') { app.innerHTML = `<div class="login"><h1>受験校プランナー</h1><p class="err-msg">表計算ライブラリを読み込めませんでした。インターネットに接続して再読み込みしてください。</p></div>`; return; }
   await loadConfigFile();
   try {
     await loadMaster(); if (!restoreUI()) render();
-    if (STATE.msPending) { const q = STATE.msPending; STATE.msPending = null; if (STATE.view === 'teacher' && isTeacherOk()) { try { await msFinish(q); STATE.teacher.msAutoDone = true; await msPull(false); } catch (e) { STATE.teacher.ms = { err: e.message }; render(); } } }
   }
   catch (e) {
     app.innerHTML = `<div class="login"><h1>受験校プランナー</h1><p class="err-msg">大学データ（${esc(C.MASTER_URL)}）を読み込めませんでした。</p>
