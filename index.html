@@ -387,11 +387,12 @@ function bufToB64(buf) { const u = new Uint8Array(buf); let s = ''; for (let i =
 async function ghFetch(path, opt = {}) {
   const res = await fetch(`https://api.github.com/repos/${C.GITHUB_REPO}${path}`, Object.assign({}, opt, { headers: Object.assign({ Accept: 'application/vnd.github+json', Authorization: 'Bearer ' + ghToken() }, opt.headers || {}) }));
   let j = null; try { j = await res.json(); } catch (e) { }
-  if (!res.ok) { const m = res.status === 401 ? '合鍵が正しくないか、期限が切れています' : res.status === 403 ? 'この合鍵には書き込みの権限がありません' : res.status === 404 ? '合鍵の対象に jukenko が選ばれていません' : ((j && j.message) || ''); throw new Error(`${m}（${res.status}）`); }
+  if (!res.ok) { const m = res.status === 401 ? '合鍵が正しくないか、期限が切れています' : res.status === 403 ? 'この合鍵には書き込みの権限がありません。システム設定の上の表示に直し方があります' : res.status === 404 ? '合鍵の対象に jukenko が選ばれていません' : ((j && j.message) || ''); throw new Error(`${m}（${res.status}）`); }
   return j;
 }
 /* 公開できるかの確認（合鍵の有無・有効性・書き込み権限） */
 const GH_DATE_KEY = 'jukenko_planner_github_token_date';
+const GH_WRITE_HELP = 'この合鍵では読むことはできますが、書き込みができません。原因はたいてい次のどちらかです。(1) 合鍵を作るとき「Permissions」の「Contents」が Read-only のまま → GitHubの合鍵の設定画面で Read and write に変えて保存（貼り直しは不要）。(2) 組織 nu1school で合鍵の承認待ち → 組織の Owner が github.com/organizations/nu1school/settings/personal-access-token-requests で承認。';
 async function checkGh() {
   const t = STATE.teacher;
   if (!ghToken()) { t.gh = { st: 'none' }; return; }
@@ -404,8 +405,12 @@ async function checkGh() {
     if (res.status === 401) t.gh = { st: 'bad', why: '合鍵の期限が切れているか、合鍵が正しくありません。作り直して貼り直してください。', reg };
     else if (res.status === 404) t.gh = { st: 'bad', why: `この合鍵では ${C.GITHUB_REPO} を開けません。作るときに Resource owner と対象（jukenko）を選び直してください。組織の承認待ちの場合もあります。`, reg };
     else if (!res.ok) t.gh = { st: 'bad', why: `GitHubに確認できませんでした（${res.status}）。時間をおいて開き直してください。`, reg };
-    else if (!(j && j.permissions && j.permissions.push)) t.gh = { st: 'bad', why: 'この合鍵は読み取り専用です。作るときに「Contents」を Read and write にしてください。', reg };
-    else t.gh = { st: 'ok', exp: normDate(exp.slice(0, 10)) || '', reg };
+    else {
+      /* 実際に書き込めるかを確かめる（どこにも表示されない小さなデータを1つ作るだけ。ページや日程は変わらない） */
+      const w = await fetch(`https://api.github.com/repos/${C.GITHUB_REPO}/git/blobs`, { method: 'POST', headers: { Accept: 'application/vnd.github+json', Authorization: 'Bearer ' + ghToken() }, body: JSON.stringify({ content: 'jukenko write check', encoding: 'utf-8' }) });
+      if (w.ok) t.gh = { st: 'ok', exp: normDate(exp.slice(0, 10)) || '', reg };
+      else t.gh = { st: 'bad', why: GH_WRITE_HELP, reg };
+    }
   } catch (e) { t.gh = { st: 'bad', why: 'インターネットにつながっていないか、GitHubに接続できません。', offline: true }; }
 }
 function ghStatusHTML(big) {
@@ -1918,9 +1923,7 @@ document.addEventListener('click', async e => {
     case 'gh-save': {
       const sys = STATE.teacher.sys = STATE.teacher.sys || {}; const v = $('#gh-token').value.trim();
       if (v) { try { localStorage.setItem(GH_KEY, v); localStorage.setItem(GH_DATE_KEY, today); } catch (ex) { } }
-      try { const r = await ghFetch(''); sys.ghOk = !!(r.permissions && r.permissions.push); sys.ghMsg = sys.ghOk ? '登録しました。このパソコンから公開できます。' : 'この合鍵では書き込みができません。作るときに「Contents」を Read and write にしてください。'; }
-      catch (ex) { sys.ghOk = false; sys.ghMsg = '登録できませんでした：' + ex.message; }
-      await checkGh(); render(); break;
+      await checkGh(); const g = STATE.teacher.gh || {}; sys.ghOk = g.st === 'ok'; sys.ghMsg = sys.ghOk ? '登録しました。このパソコンから公開できます。' : '登録しましたが、まだ公開できません：' + (g.why || ''); render(); break;
     }
     case 'gh-clear': { try { localStorage.removeItem(GH_KEY); localStorage.removeItem(GH_DATE_KEY); } catch (ex) { } STATE.teacher.sys = {}; STATE.teacher.gh = { st: 'none' }; render(); toast('合鍵の登録を消しました'); break; }
     case 'gh-recheck': STATE.teacher.gh = { st: 'checking' }; render(); await checkGh(); render(); break;
