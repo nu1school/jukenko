@@ -143,12 +143,12 @@ def facs_of(u):
             if f and f not in seen and f not in AP.EXCLUDE.get(u, []) and f not in ('医', '歯', '薬'):
                 seen.append(f)
     return seen
-for u, items in AP.D.items():
+for u, items in list(AP.D.items()) + list(AP.EXTRA.items()):
     allf = facs_of(u)
     for it in items:
         targets = allf if it['facs'] == ['全'] else it['facs']
         for f in targets:
-            fac, dep = (('現代教養', f) if u == '東京女子' else (f, ''))
+            fac, dep = (('現代教養', f) if u == '東京女子' else tuple(f.split('|')) if '|' in f else (f, ''))
             r = R('', '', '', '', conf='確定', src=AP.SRC)
             r.update(open=D(it['open']) if '/' in it['open'] else it['open'], close=it['close'], ann=it['ann'], proc=it['proc'])
             for d in (it['dates'] or ['']):
@@ -195,9 +195,10 @@ if border_p and full_p:
     for z in rows:
         if z.get('added'):
             bs = byfac.get((z['u'], z['f'].split('（')[0]), [])
+            bs = [b for b in bs if b['学科名'] == z['g']] or bs
             if z['kind'] == '共テ利用':
                 v = sorted(int(b['共通テストボーダーライン(得点率)']) for b in bs if str(b.get('共通テストボーダーライン(得点率)')) not in ('None', ''))
-                if v: z['note'] += f'。共テボーダー（学部内の学科・方式）{v[0]}〜{v[-1]}%'; nb['追加・共テ'] += 1
+                if v: z['note'] += '。共テボーダー（学部内の学科・方式）' + (f'{v[0]}%' if v[0] == v[-1] else f'{v[0]}〜{v[-1]}%'); nb['追加・共テ'] += 1
             else:
                 v = sorted(float(b['２次・私大ボーダーランク(偏差値下限値)']) for b in bs if str(b.get('２次・私大ボーダーランク(偏差値下限値)')) not in ('--', 'None', ''))
                 if v: z['rank'] = f'{v[0]:.1f}～{v[-1] + 2.4:.1f}'; nb['追加・偏差値'] += 1
