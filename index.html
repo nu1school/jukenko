@@ -186,7 +186,7 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .cal .day.kyo{background:var(--c-kyo-soft)}
 
 /* 大学群の色（カレンダーのチップ） */
-.g0{--gc:#b42335} .g1{--gc:#6b3fa0} .g2{--gc:#0f7c80} .g3{--gc:#c26a00} .g4{--gc:#7a5c2e} .g5{--gc:#2e8540} .g6{--gc:#c2417a} .g7{--gc:#1f4e9c} .g8{--gc:#5a6578}
+.g0{--gc:#b42335} .g1{--gc:#6b3fa0} .g2{--gc:#0f7c80} .g3{--gc:#c26a00} .g4{--gc:#7a5c2e} .g5{--gc:#2e8540} .g6{--gc:#c2417a} .g7{--gc:#1f4e9c} .g8{--gc:#5a6578} .g9{--gc:#8a6d00} .g10{--gc:#3d7a99} .g11{--gc:#9b4d2e} .g12{--gc:#4f7a28}
 .uchip{display:inline-block;font-size:11.5px;line-height:1.45;padding:0 5px;border-radius:4px;border:1px solid transparent;cursor:pointer;white-space:nowrap;
   background:color-mix(in srgb,var(--gc) var(--chipmix),var(--surface));color:var(--ink);font-weight:700}
 .uchip:hover{border-color:var(--gc)}
@@ -851,6 +851,7 @@ function compactMe(me) {
     k: (me.picks || []).map(p => {
       const base = M.byId[p.id]; const r = [p.id, Math.max(0, PREFS.indexOf(p.pref)), Math.max(0, STATUSES.indexOf(p.status))];
       const changed = (p.date || '') !== ((base && base.date) || (p.snap && p.snap.date) || '');
+      if (p.custom) { r.push(p.date || '', p.memo || '', p.custom); return r; }
       if (changed || p.memo) r.push(changed ? (p.date || '') : 0);
       if (p.memo) r.push(p.memo);
       return r;
@@ -875,6 +876,7 @@ async function decodeCode(code) {
     cls: String(o.c), no: String(o.n), name: String(o.m || ''), updated: o.t || '', year: o.y || '', profile: pf, key: o.kk || '', backSeen: o.bs || '',
     picks: (o.k || []).map(r => {
       const id = r[0]; const base = M.byId[id];
+      if (r[5] && typeof r[5] === 'object') { const c = r[5]; return { id, date: r[3] || c.date || '', pref: PREFS[r[1]] || '', status: STATUSES[r[2]] || '', memo: r[4] || '', custom: c, snap: customSnap(c) }; }
       return { id, date: typeof r[3] === 'string' ? r[3] : (base ? base.date : ''), pref: PREFS[r[1]] || '', status: STATUSES[r[2]] || '', memo: r[4] || '',
         snap: base ? snapOf(base) : { uni: '（大学データにない入試）', fac: '', dep: '', met: 'ID ' + id, kind: '' } };
     })
@@ -1167,12 +1169,13 @@ function planHTML() {
   const gen = all.filter(p => exOf(p).kind !== '共テ利用').sort((a, b) => (exOf(a).date || '9').localeCompare(exOf(b).date || '9'));
   const kyo = all.filter(p => exOf(p).kind === '共テ利用').sort((a, b) => (exOf(a).ann || '9').localeCompare(exOf(b).ann || '9'));
   const list = all.length ? `
+    ${STATE.customOpen ? customFormHTML() : ''}
     <div class="sec-h"><h2>個別試験のある入試</h2><span class="hint">試験日順。試験日を選べる方式は「試験日」を自分の受験日に変えてください。</span></div>
     ${gen.length ? gen.map(p => pickHTML(p, ps)).join('') : `<div class="empty">まだありません。</div>`}
     <div class="sec-h" style="margin-top:22px"><h2>共通テスト利用</h2><span class="hint">合格発表順</span></div>
     ${kyo.length ? kyo.map(p => pickHTML(p, ps)).join('') : `<div class="empty">共テ利用はまだありません。<button class="linkbtn" data-tab="kyo">共テ利用タブ</button>から追加できます。</div>`}`
-    : `<div class="empty"><b>まだ受験校がありません。</b><br>「<button class="linkbtn" data-tab="uni">大学から追加</button>」か「<button class="linkbtn" data-tab="cal">カレンダーから追加</button>」で選んでください。</div>`;
-  const toggle = all.length ? `<div class="filters" style="margin-bottom:6px"><button class="fchip" data-pview="list" aria-pressed="${STATE.planView === 'list'}">リスト</button><button class="fchip" data-pview="cal" aria-pressed="${STATE.planView === 'cal'}">カレンダー</button></div>` : '';
+    : `<div class="empty"><b>まだ受験校がありません。</b><br>「<button class="linkbtn" data-tab="uni">大学から追加</button>」か「<button class="linkbtn" data-tab="cal">カレンダーから追加</button>」で選んでください。リストにない大学は「<button class="linkbtn" data-act="cf-open">自由に入れる</button>」から。</div>${STATE.customOpen ? customFormHTML() : ''}`;
+  const toggle = all.length ? `<div class="filters" style="margin-bottom:6px"><button class="fchip" data-pview="list" aria-pressed="${STATE.planView === 'list'}">リスト</button><button class="fchip" data-pview="cal" aria-pressed="${STATE.planView === 'cal'}">カレンダー</button>${STATE.customOpen ? '' : '<button class="btn sm" data-act="cf-open" style="margin-left:auto">＋ リストにない大学を自由に入れる</button>'}</div>` : '';
   const back = me.backMsg ? `<div class="notice info" style="display:flex;gap:10px;align-items:center"><span style="flex:1">${esc(me.backMsg)}</span><button class="btn sm" data-act="backok">確認しました</button></div>` : '';
   const main = back + (STATE.planView === 'cal' && all.length ? `${legendHTML()}${planCalHTML(ps)}` : list);
   return `<div class="plan"><div style="min-width:0">${toggle}${main}</div>
@@ -1281,11 +1284,50 @@ function uniCardsHTML(filter, attr, kyoOnly) {
   }
   return h ? `<div class="unis">${h}</div>` : `<div class="empty">該当する大学がありません。</div>`;
 }
+/* ---------- 自由記入（リストにない大学） ---------- */
+function customSnap(c) {
+  return { id: '', grp: '自由記入', uni: c.uni, fac: c.fac || '', dep: c.dep || '', met: c.met || '（方式未記入）', kind: c.kind || '一般', date: c.date || '',
+    open: '', close: c.close || '', ann: c.ann || '', proc: c.proc || '', rank: '', bd: '', kt: '', kp: '', nt: '', np: '', req: '',
+    note: '自由記入（大学データにない入試）', conf: '自由記入', custom: true };
+}
+function customFormHTML() {
+  const f = STATE.cform || {};
+  const kinds = ['一般', '共テ併用', '共テ利用', '国公立'];
+  return `<section class="panel customf" id="customForm"><h3>リストにない大学を入れる（自由記入）</h3>
+    <p class="note" style="margin-top:0">大学データにない大学・方式は、ここに自分で入れられます。<b>大学名と試験日</b>（共テ利用は出願締切）は必ず入れてください。ほかは分かる範囲で。</p>
+    <div class="row2"><div class="field"><label for="cf-uni">大学名（必須）</label><input id="cf-uni" class="inp" value="${esc(f.uni || '')}" placeholder="例：〇〇大学"></div>
+      <div class="field"><label for="cf-kind">種別</label><select id="cf-kind" class="inp">${kinds.map(k => `<option${(f.kind || '一般') === k ? ' selected' : ''}>${k}</option>`).join('')}</select></div></div>
+    <div class="row2"><div class="field"><label for="cf-fac">学部</label><input id="cf-fac" class="inp" value="${esc(f.fac || '')}" placeholder="例：経済学部"></div>
+      <div class="field"><label for="cf-dep">学科</label><input id="cf-dep" class="inp" value="${esc(f.dep || '')}" placeholder="例：経済学科"></div></div>
+    <div class="row2"><div class="field"><label for="cf-met">方式</label><input id="cf-met" class="inp" value="${esc(f.met || '')}" placeholder="例：一般A日程"></div>
+      <div class="field"><label for="cf-date">試験日（必須・共テ利用は不要）</label><input id="cf-date" class="inp" type="date" value="${esc(f.date || '')}"></div></div>
+    <div class="row2"><div class="field"><label for="cf-close">出願締切</label><input id="cf-close" class="inp" type="date" value="${esc(f.close || '')}"></div>
+      <div class="field"><label for="cf-ann">合格発表</label><input id="cf-ann" class="inp" type="date" value="${esc(f.ann || '')}"></div></div>
+    <div class="row2"><div class="field"><label for="cf-proc">手続締切</label><input id="cf-proc" class="inp" type="date" value="${esc(f.proc || '')}"></div><div></div></div>
+    <div class="err-msg" id="cf-err"></div>
+    <div class="tools" style="margin:0"><button class="btn primary" data-act="cf-add">受験予定に追加</button><button class="btn ghost" data-act="cf-close">閉じる</button></div>
+  </section>`;
+}
+function addCustomPick() {
+  const g = id => ($('#' + id) || {}).value || '';
+  const c = { uni: g('cf-uni').trim(), fac: g('cf-fac').trim(), dep: g('cf-dep').trim(), met: g('cf-met').trim(), kind: g('cf-kind') || '一般', date: g('cf-date'), close: g('cf-close'), ann: g('cf-ann'), proc: g('cf-proc') };
+  const err = $('#cf-err');
+  if (!c.uni) { err.textContent = '大学名を入れてください。'; return; }
+  if (c.kind !== '共テ利用' && !c.date) { err.textContent = '試験日を入れてください（共テ利用のときは不要です）。'; return; }
+  if (c.kind === '共テ利用' && !c.close) { err.textContent = '共テ利用のときは、出願締切を入れてください。'; return; }
+  if (c.kind === '共テ利用') c.date = '';
+  Object.keys(c).forEach(k => { if (!c[k]) delete c[k]; });
+  const id = 'c' + rid(6).replace(/[^A-Za-z0-9]/g, 'x');
+  STATE.me.picks.push({ id, date: c.date || '', pref: '', status: '', memo: '', custom: c, snap: customSnap(c) });
+  STATE.cform = null; STATE.customOpen = false;
+  touch(); refreshCounts(); toast(`追加しました：${c.uni} ${c.met || ''}`); rerenderTab();
+}
 function uniTabHTML() {
   const s = STATE.search;
   if (s.uni) return uniDetailHTML(s.uni, s, false);
   const q = s.q.trim();
-  return `<div class="filters">${grpChips(s.grp, 'data-sgrp')}<input class="inp search" id="s-q" placeholder="大学名で検索（例：明治、理科）" value="${esc(s.q)}"></div>
+  return `${STATE.customOpen ? customFormHTML() : `<div class="tools" style="margin:0 0 10px"><button class="btn" data-act="cf-open">＋ リストにない大学を自由に入れる</button></div>`}
+    <div class="filters">${grpChips(s.grp, 'data-sgrp')}<input class="inp search" id="s-q" placeholder="大学名で検索（例：明治、理科）" value="${esc(s.q)}"></div>
     ${subjBarHTML()}
     ${uniCardsHTML(u => (!s.grp || M.uniInfo[u].grp === s.grp) && (!q || uniName(u).includes(q) || u.includes(q)), 'data-suni')}`;
 }
@@ -2025,6 +2067,10 @@ document.addEventListener('click', async e => {
       t.disabled = false; const st = $('#submitState'); if (st) st.innerHTML = submitStateHTML();
       break;
     }
+    case 'backok': if (STATE.me) { delete STATE.me.backMsg; storeMe(); rerenderTab(); } break;
+    case 'cf-open': STATE.customOpen = true; STATE.cform = null; if (STATE.planView === 'cal' && STATE.tab === 'plan') STATE.planView = 'list'; rerenderTab(); { const el = $('#customForm'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } break;
+    case 'cf-close': STATE.customOpen = false; rerenderTab(); break;
+    case 'cf-add': addCustomPick(); break;
     case 'codeopen': STATE.code = await encodeCode(STATE.me); STATE.codeOpen = true; render(); break;
     case 'codeclose': if (e.target === t || t.matches('button')) { STATE.codeOpen = false; render(); } break;
     case 'sharecode': { STATE.code = await encodeCode(STATE.me); try { await navigator.share({ title: '受験校プランナーの復元コード', text: STATE.code }); } catch (ex) { } break; }

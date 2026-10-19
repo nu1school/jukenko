@@ -6,12 +6,14 @@ haiten_full.json があれば、受験科目・配点の列も埋める。
 import sys, json, re, hashlib, collections
 sys.path.insert(0, __import__('os').path.dirname(__file__))
 from rules import general, extra_general, kyotest, GROUPS, FAC_FILTER, DEPT_FILTER, D, R, ABBR
+import added_private as AP
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 
 raw, haiten_p, out = sys.argv[1:4]
 full_p = sys.argv[4] if len(sys.argv) > 4 else None
+border_p = sys.argv[5] if len(sys.argv) > 5 else None
 GROUP_OF = {u: g for g, us in GROUPS.items() for u in us}
 METHOD_HINT = ('方式', '日程', '全学', '学部', '統一', '英語', '技能', '科目', '教科', '型', 'コア', 'プラス', '期',
                '共通', '併用', '利用', '地域枠', 'ＴＥＡＰ', '多面的')
@@ -74,7 +76,7 @@ keinet_unis = {x['uni'] for x in json.load(open(raw))}
 seen2 = set()
 for h in H:
     u = h['大学名']
-    if u not in GROUP_OF or GROUP_OF[u] == '国公立' or h['kind'] != '私':
+    if u not in GROUP_OF or GROUP_OF[u] == '国公立' or h['kind'] != '私' or u in AP.D:
         continue
     f, g = h['学部名'] or '', h['学科名'] or ''
     if u in FAC_FILTER and f not in FAC_FILTER[u]:
@@ -117,17 +119,41 @@ for h in H:
     if GROUP_OF.get(u) != '国公立' or h['kind'] != '国':
         continue
     f, g, m = h['学部名'] or '', h['学科名'] or '', h['日程方式名'] or ''
-    if m not in ('前期', '後期'):
+    if m in ('', 'None') and u == '東京':
+        m = '前期'
+    if m not in ('前期', '中期', '後期'):
         continue
     k = (u, f, g, m)
     if k in seen3:
         continue
     seen3.add(k)
-    date = D('2/25') if m == '前期' else D('3/12')
-    r = R('1/25', '2/3', '', '', note=('前期は2/25から（2日間の学部あり）。合格発表は例年3/6〜3/10頃' if m == '前期'
-                                      else '後期は3/12から。合格発表は例年3/20〜3/23頃') + '。出願期間・発表日は募集要項（11月頃公表）で確認',
+    date = D({'前期': '2/25', '中期': '3/8', '後期': '3/12'}[m])
+    r = R('1/25', '2/3', '', '', note={'前期': '前期は2/25から（2日間以上の学部あり）。合格発表は例年3/6〜3/10頃',
+                                      '中期': '公立中期は3/8から。合格発表は例年3/20頃',
+                                      '後期': '後期は3/12から。合格発表は例年3/20〜3/23頃'}[m] + ('。実技あり・日程が異なる。要項で確認' if u == '東京芸術' else '') + '。出願期間・発表日は募集要項（11月頃公表）で確認',
           conf='目安', src='国公立大学共通日程')
     add(u=u, f=f, g=g, m=m + '日程', kind='国公立', date=date, rank='', r=r, note=r['note'], src2='Kei-Net科目・配点')
+
+# ---------- 5. 追加の私立（マナビジョンの日程） ----------
+def facs_of(u):
+    seen = []
+    for h in H:
+        if h['大学名'] == u and h['kind'] == '私':
+            f = h['学部名'] or ''
+            if f and f not in seen and f not in AP.EXCLUDE.get(u, []) and f not in ('医', '歯', '薬'):
+                seen.append(f)
+    return seen
+for u, items in AP.D.items():
+    allf = facs_of(u)
+    for it in items:
+        targets = allf if it['facs'] == ['全'] else it['facs']
+        for f in targets:
+            fac, dep = (('現代教養', f) if u == '東京女子' else (f, ''))
+            r = R('', '', '', '', conf='確定', src=AP.SRC)
+            r.update(open=D(it['open']) if '/' in it['open'] else it['open'], close=it['close'], ann=it['ann'], proc=it['proc'])
+            for d in (it['dates'] or ['']):
+                add(u=u, f=fac, g=dep, m=it['met'], kind=it['kind'], date=d, rank='', r=dict(r),
+                    note=it['note'] + ('。' if it['note'] else '') + '科目・配点は要項で確認', src2=AP.SRC, added=True)
 
 # ---------- ID・並べ替え ----------
 order_g = list(GROUPS)
@@ -150,9 +176,41 @@ if full_p:
     HM.load(json.load(open(full_p)))
     for z in rows:
         d, how = HM.find(z['u'], z['f'], z['g'], z['m'], z['kind'])
-        z['sub'] = summarize(d) if d else {}
+        z['sub'] = summarize(d) if (d and not z.get('added')) else {}
         nsub['あり' if d else 'なし'] += 1
 print('科目データ', nsub)
+
+# ---------- ボーダー（河合塾） ----------
+nb = collections.Counter()
+if border_p and full_p:
+    BRD = {b['大学コード(10桁)']: b for b in json.load(open(border_p))}
+    def rk(b):
+        if b.get('２次・私大ボーダーランク') == 'BF': return 'BF'
+        try: x = float(b.get('２次・私大ボーダーランク(偏差値下限値)'))
+        except (TypeError, ValueError): return ''
+        return f'{x:.1f}～{x + 2.4:.1f}'
+    byfac = collections.defaultdict(list)
+    for b in BRD.values():
+        byfac[(b['大学名'], (b['学部名'] or '').split('（')[0])].append(b)
+    for z in rows:
+        if z.get('added'):
+            bs = byfac.get((z['u'], z['f'].split('（')[0]), [])
+            if z['kind'] == '共テ利用':
+                v = sorted(int(b['共通テストボーダーライン(得点率)']) for b in bs if str(b.get('共通テストボーダーライン(得点率)')) not in ('None', ''))
+                if v: z['note'] += f'。共テボーダー（学部内の学科・方式）{v[0]}〜{v[-1]}%'; nb['追加・共テ'] += 1
+            else:
+                v = sorted(float(b['２次・私大ボーダーランク(偏差値下限値)']) for b in bs if str(b.get('２次・私大ボーダーランク(偏差値下限値)')) not in ('--', 'None', ''))
+                if v: z['rank'] = f'{v[0]:.1f}～{v[-1] + 2.4:.1f}'; nb['追加・偏差値'] += 1
+            continue
+        d, how = HM.find(z['u'], z['f'], z['g'], z['m'], z['kind'])
+        b = BRD.get(d.get('１０桁コード')) if d else None
+        if not b: nb['なし'] += 1; continue
+        r2 = rk(b)
+        if r2: z['rank'] = r2
+        p = b.get('共通テストボーダーライン(得点率)')
+        if str(p) not in ('None', '') and z['kind'] != '一般': z['bd'] = str(p)
+        nb['あり'] += 1
+print('ボーダー', nb)
 
 # ---------- 書き出し ----------
 wb = Workbook()
@@ -164,7 +222,7 @@ ws.append(cols)
 for z in rows:
     r = z['r']
     ws.append([z['id'], GROUP_OF[z['u']], z['u'], z['f'], z['g'], z['m'], z['kind'], z['date'], r['open'], r['close'],
-               r['ann'], r['proc'], z['rank'], '', z.get('sub', {}).get('kt', ''), z.get('sub', {}).get('kp', ''),
+               r['ann'], r['proc'], z['rank'], z.get('bd', ''), z.get('sub', {}).get('kt', ''), z.get('sub', {}).get('kp', ''),
                z.get('sub', {}).get('nt', ''), z.get('sub', {}).get('np', ''), z.get('sub', {}).get('req', ''),
                z['note'], r['conf'], r['src'] or z['src2']])
 widths = [10, 12, 14, 18, 26, 22, 9, 11, 11, 11, 11, 11, 12, 11, 44, 8, 40, 8, 30, 50, 14, 24]
