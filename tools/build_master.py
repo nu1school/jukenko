@@ -62,6 +62,10 @@ for x in json.load(open(raw)):
     if r is None:
         unmatched[(u, f, m)] += 1
         r = R('', '', '', '', conf='要確認')
+    if mm and mm.group(1) == '2次':
+        fin = re.search(r'最終発表(\d+/\d+)', r['note'] or '')
+        if fin:
+            r = dict(r, ann=D(fin.group(1)))
     if r['note']:
         note.append(r['note'])
     add(u=u, f=f, g=g, m=m, kind=kind, date=date, rank=clean_rank(x['rank']), r=r, note='／'.join(note), src2='Kei-Net入試日一覧')
