@@ -346,6 +346,15 @@ table.ex tr.added td:last-child{background:var(--c-exam-soft)}
   .pp.calonly .pcal td{font-size:8pt;line-height:1.3;padding:0.8mm 1.2mm}
   .pp.calonly .pcal td .n{font-size:9pt}
   .pp.calonly .pcal th{font-size:9pt;padding:1mm}
+  .pp.clsum table{font-size:9pt}
+  .pp.clsum tr{page-break-inside:avoid;break-inside:avoid}
+  .pp.clsum thead{display:table-header-group}
+  .pp.clsum td.c{text-align:center}
+  .pp.clsum .sm{font-size:7pt;color:#444}
+  .pp.clsum .ci{display:inline-block;margin:0 3mm 0.6mm 0;white-space:nowrap}
+  .pp.clsum .ci small{font-size:7.4pt;color:#444}
+  .pp.clsum .cd{font-weight:700}
+  .pp.clsum .pf{display:inline-block;border:0.5pt solid #333;border-radius:1mm;font-size:6.5pt;line-height:1;padding:0.4mm 0.6mm;margin-right:0.8mm}
 }
 </style>
 </head>
@@ -1560,7 +1569,11 @@ function calPrintHTMLFor(st) {
 function doPrint(students, mode) {
   let ps = document.getElementById('pageStyle');
   if (!ps) { ps = document.createElement('style'); ps.id = 'pageStyle'; document.head.appendChild(ps); }
-  ps.textContent = mode === 'cal' ? '@page{size:A4 landscape;margin:8mm 9mm}' : '@page{size:A4 portrait;margin:12mm 11mm}';
+  ps.textContent = (mode === 'cal' || mode === 'clsum') ? '@page{size:A4 landscape;margin:8mm 9mm}' : '@page{size:A4 portrait;margin:12mm 11mm}';
+  if (mode === 'clsum') {
+    const by = {}; students.forEach(st => (by[st.cls] = by[st.cls] || []).push(st));
+    $('#print').innerHTML = Object.keys(by).sort((a, b) => String(a).localeCompare(String(b), 'ja', { numeric: true })).map(c => classSumHTMLFor(c, by[c])).join('');
+  } else
   $('#print').innerHTML = students.map(st => mode === 'cal' ? calPrintHTMLFor(st) : printHTMLFor(st, mode === 'list')).join('');
   setTimeout(() => window.print(), 60);
 }
@@ -1662,12 +1675,49 @@ function tListHTML() {
   const allSel = list.length && list.every(s => t.sel.has(s.cls + '#' + s.no));
   return `<div class="tools"><button class="btn" data-act="csv-picks">受験校一覧CSV（1行1受験）</button><button class="btn" data-act="csv-students">生徒一覧CSV（1行1生徒）</button>
     <button class="btn primary" data-act="tprint">選んだ生徒の受験校一覧PDF・1人1枚（${[...t.sel].length}人）</button><label style="font-size:13px"><input type="checkbox" id="t-withcal"${STATE.pdfCal ? ' checked' : ''}> カレンダーも付ける</label><span class="note">CSVは表示中のクラス・検索結果が対象です。</span></div>
+    ${classPdfHTML()}
     <div class="tbl-wrap" style="border:1px solid var(--line);border-radius:var(--r)"><table class="ttable"><thead><tr><th><input type="checkbox" data-act="selall"${allSel ? ' checked' : ''} aria-label="すべて選択"></th><th>組</th><th>番号</th><th>氏名</th><th>受験校</th><th>一般/併用</th><th>共テ利用</th><th>国公立</th><th>英検</th><th>共テ目標</th><th>第1志望</th><th>更新</th><th></th></tr></thead><tbody>
     ${list.map(s => { const ps = (s.picks || []).filter(p => p.status !== '取りやめ'); const k = n => ps.filter(p => n.includes(exOf(p).kind)).length; const r = kyoTotals(s.profile); const key = s.cls + '#' + s.no;
       return `<tr><td><input type="checkbox" data-sel="${esc(key)}"${t.sel.has(key) ? ' checked' : ''} aria-label="選択"></td><td>${esc(s.cls)}</td><td class="num">${esc(s.no)}</td><td><b>${esc(s.name)}</b>${fbReady() && s.sid ? `<div class="note" style="margin:0">${esc(subState(s))}</div>` : ''}</td><td class="num">${ps.length}</td><td class="num">${k(['一般', '共テ併用'])}</td><td class="num">${k(['共テ利用'])}</td><td class="num">${k(['国公立'])}</td>
       <td>${esc((s.profile || {}).eiken || '')}${(s.profile || {}).cse ? ` <span class="num">${esc(s.profile.cse)}</span>` : ''}</td><td class="num">${r.mx ? `${r.tg}/${r.mx}` : ''}</td><td style="max-width:220px;overflow:hidden;text-overflow:ellipsis">${esc((s.profile || {}).hope1 || '')}</td><td class="num">${s.updated ? esc(String(s.updated).slice(5, 16).replace('T', ' ')) : ''}</td>
       <td><button class="btn sm" data-detail="${esc(key)}">詳細</button> <button class="btn sm primary" data-act="ai-copy" data-key="${esc(key)}">AI用にコピー</button></td></tr>`; }).join('') || '<tr><td colspan="13">上の欄から提出データを読み込んでください。</td></tr>'}
     </tbody></table></div>`;
+}
+const tClasses = () => [...new Set(STATE.teacher.students.map(s => s.cls))].sort((a, b) => String(a).localeCompare(String(b), 'ja', { numeric: true }));
+function classPdfHTML() {
+  const t = STATE.teacher; const cs = tClasses(); if (!cs.length) return '';
+  const mode = STATE.clsPdfMode || 'sum';
+  const n = c => t.students.filter(s => s.cls === c).length;
+  return `<div class="panel clspdf"><h3 style="margin:0 0 6px">クラスごとのPDF</h3>
+    <div class="tools" style="margin:0 0 8px"><span style="font-size:13px;font-weight:700">形式</span>
+      <label style="font-size:13px"><input type="radio" name="clsmode" value="sum"${mode === 'sum' ? ' checked' : ''}> クラス一覧表（1クラスを1つの表に・A4横）</label>
+      <label style="font-size:13px"><input type="radio" name="clsmode" value="each"${mode === 'each' ? ' checked' : ''}> 1人1枚（受験校一覧・A4縦）</label></div>
+    <div class="tools" style="margin:0">${cs.map(c => `<button class="btn" data-act="clspdf" data-cls="${esc(c)}">${esc(clsL(c))}（${n(c)}人）</button>`).join('')}
+      <button class="btn ghost" data-act="clspdf" data-cls="">全クラス（クラスごとに改ページ）</button></div>
+    <p class="note" style="margin:6px 0 0">印刷画面で「PDFに保存」を選ぶとPDFになります。1人1枚の形式は「カレンダーも付ける」の設定に従います。</p></div>`;
+}
+const PREF_S = { 'チャレンジ': 'チ', '実力相応': '実', '安全': '安' };
+function classSumHTMLFor(cls, list) {
+  const rowsOf = s => (s.picks || []).filter(p => p.status !== '取りやめ').map(p => ({ p, x: exOf(p) }));
+  const item = ({ p, x }) => {
+    const d = x.kind === '共テ利用' ? '' : (fmt(x.date) || '日未定');
+    const res = p.status && p.status !== '未定' ? `<b>【${esc(p.status)}】</b>` : '';
+    return `<span class="ci">${p.pref ? `<span class="pf">${esc(PREF_S[p.pref] || p.pref)}</span>` : ''}${d ? `<span class="cd">${esc(d)}</span> ` : ''}${esc(uniAbbr(x.uni))} ${esc(facName(x.fac) || '')}${x.dep ? ' ' + esc(depName(x.dep)) : ''}<small> ${esc(x.met)}</small>${res}</span>`;
+  };
+  const body = list.map(s => {
+    const all = rowsOf(s);
+    const gen = all.filter(r => r.x.kind !== '共テ利用').sort((a, b) => (a.x.date || a.x.ann || '9').localeCompare(b.x.date || b.x.ann || '9'));
+    const kyo = all.filter(r => r.x.kind === '共テ利用');
+    const pf = s.profile || {};
+    return `<tr><td class="nw c">${esc(s.no)}</td><td class="nw"><b>${esc(s.name)}</b><div class="sm">${esc(subState(s))}</div></td>
+      <td class="c">${all.length}</td><td>${gen.map(item).join('') || '<span class="sm">—</span>'}</td><td>${kyo.map(item).join('') || '<span class="sm">—</span>'}</td>
+      <td class="sm">${esc(pf.hope1 || '')}${pf.eiken ? `<div>英検 ${esc(pf.eiken)}</div>` : ''}</td></tr>`;
+  }).join('');
+  const nSub = list.filter(s => s.submittedAt).length;
+  return `<section class="pp clsum"><h1>${esc(M.settings.year)}年度入試　${esc(clsL(cls))} 受験校一覧</h1>
+    <div class="meta"><span>${esc(C.SCHOOL || '')}　${list.length}人（提出 ${nSub}人）</span><span>位置づけ：チ＝チャレンジ　実＝実力相応　安＝安全　／　出力日 ${today.replace(/-/g, '/')}</span></div>
+    <table><thead><tr><th>番号</th><th>氏名</th><th>件数</th><th>一般・共テ併用・国公立（試験日順）</th><th>共テ利用</th><th>第1志望・英検</th></tr></thead><tbody>${body}</tbody></table>
+    <p class="foot">日程は大学データ（${esc(M.settings.updated || '')}時点）によるものです。</p></section>`;
 }
 function tDetailHTML(key) {
   const s = STATE.teacher.students.find(x => x.cls + '#' + x.no === key); if (!s) return '';
@@ -2129,6 +2179,10 @@ document.addEventListener('click', async e => {
     }
     case 'selall': { const list = tFiltered(); list.forEach(s => STATE.teacher.sel[t.checked ? 'add' : 'delete'](s.cls + '#' + s.no)); render(); break; }
     case 'tprint': { const list = STATE.teacher.students.filter(s => STATE.teacher.sel.has(s.cls + '#' + s.no)); if (!list.length) { toast('左のチェックで生徒を選んでください'); break; } doPrint(list.sort((a, b) => String(a.cls).localeCompare(String(b.cls), 'ja', { numeric: true }) || a.no - b.no), STATE.pdfCal ? '' : 'list'); break; }
+    case 'clspdf': {
+      const list = STATE.teacher.students.filter(s => !d.cls || s.cls === d.cls).sort((a, b) => String(a.cls).localeCompare(String(b.cls), 'ja', { numeric: true }) || a.no - b.no);
+      if (!list.length) { toast('このクラスの生徒がいません'); break; }
+      doPrint(list, (STATE.clsPdfMode || 'sum') === 'sum' ? 'clsum' : (STATE.pdfCal ? '' : 'list')); break; }
     case 'tprint1': { const s = STATE.teacher.students.find(x => x.cls + '#' + x.no === d.key); if (s) doPrint([s], STATE.pdfCal ? '' : 'list'); break; }
     case 'closedetail': if (e.target === t || t.matches('button')) { STATE.teacher.detail = null; render(); } break;
     case 'csv-picks': download(`受験校一覧_${stamp8()}.csv`, csv(picksCSVRows(tFiltered())), 'text/csv'); break;
@@ -2167,6 +2221,7 @@ document.addEventListener('change', e => {
   const t = e.target; const d = t.dataset;
   if (t.id === 't-cls') { STATE.teacher.cls = t.value; render(); return; }
   if (t.id === 'pdf-withcal' || t.id === 't-withcal') { STATE.pdfCal = t.checked; return; }
+  if (t.name === 'clsmode') { STATE.clsPdfMode = t.value; return; }
   if (t.id === 'sortsel') { STATE.sort = t.value; rerenderTab(); return; }
   if (t.dataset.ai) { const a = loadAI(); a[t.dataset.ai] = t.type === 'checkbox' ? t.checked : t.value; saveAI(a); return; }
   if (t.id === 'chk-file' && t.files.length) { checkFile(t.files[0]); return; }
