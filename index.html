@@ -625,6 +625,26 @@ async function tDeleteStudent(key) {
   catch (e) { toast('削除できませんでした：' + e.message); }
   render();
 }
+async function tDeleteSelected() {
+  const t = STATE.teacher;
+  const list = t.students.filter(s => t.sel.has(s.cls + '#' + s.no)).sort((a, b) => String(a.cls).localeCompare(String(b.cls), 'ja', { numeric: true }) || a.no - b.no);
+  if (!list.length) { toast('左のチェックで削除する生徒を選んでください'); return; }
+  if (!fbAuth()) { toast('先に「提出データ」の欄で先生用ログインをしてください'); return; }
+  const names = list.slice(0, 15).map(s => `・${clsL(s.cls)} ${s.no}番 ${s.name}`).join('\n') + (list.length > 15 ? `\n…ほか${list.length - 15}人` : '');
+  if (!confirm(`次の${list.length}人のデータを削除します。元に戻せません。\n\n${names}\n\nよろしいですか？`)) return;
+  const ans = prompt(`本当に${list.length}人を削除する場合は「削除」と入力してください。`);
+  if (ans === null) return;
+  if (ans.trim() !== '削除') { toast('「削除」と入力されなかったので、取りやめました'); return; }
+  const tok = await tokenOf(FB_AUTH_KEY); const ng = [];
+  for (let i = 0; i < list.length; i++) {
+    const s = list[i]; toast(`削除しています… ${i + 1}/${list.length}`);
+    try { await fsReq('DELETE', `students/${s.sid}`, tok); t.students = t.students.filter(x => x !== s); t.sel.delete(s.cls + '#' + s.no); if (t.detail === s.cls + '#' + s.no) t.detail = null; }
+    catch (e) { ng.push(`${clsL(s.cls)} ${s.no}番 ${s.name}（${e.message}）`); }
+  }
+  render();
+  if (ng.length) alert(`${list.length - ng.length}人を削除しました。次の${ng.length}人は削除できませんでした：\n` + ng.join('\n'));
+  else toast(`${list.length}人を削除しました`);
+}
 /* 組・番号・氏名・パスワードの変更（先生） */
 async function tSaveAccount(key) {
   const s = findStu(key); if (!s) return;
@@ -1674,7 +1694,7 @@ function tListHTML() {
   const t = STATE.teacher; const list = tFiltered();
   const allSel = list.length && list.every(s => t.sel.has(s.cls + '#' + s.no));
   return `<div class="tools"><button class="btn" data-act="csv-picks">受験校一覧CSV（1行1受験）</button><button class="btn" data-act="csv-students">生徒一覧CSV（1行1生徒）</button>
-    <button class="btn primary" data-act="tprint">選んだ生徒の受験校一覧PDF・1人1枚（${[...t.sel].length}人）</button><label style="font-size:13px"><input type="checkbox" id="t-withcal"${STATE.pdfCal ? ' checked' : ''}> カレンダーも付ける</label><span class="note">CSVは表示中のクラス・検索結果が対象です。</span></div>
+    <button class="btn primary" data-act="tprint">選んだ生徒の受験校一覧PDF・1人1枚（${[...t.sel].length}人）</button><label style="font-size:13px"><input type="checkbox" id="t-withcal"${STATE.pdfCal ? ' checked' : ''}> カレンダーも付ける</label>${fbReady() ? `<button class="btn ghost danger" data-act="tdelsel" style="margin-left:auto">選んだ生徒を削除（${[...t.sel].length}人）</button>` : ''}<span class="note" style="flex-basis:100%">CSVは表示中のクラス・検索結果が対象です。</span></div>
     ${classPdfHTML()}
     <div class="tbl-wrap" style="border:1px solid var(--line);border-radius:var(--r)"><table class="ttable"><thead><tr><th><input type="checkbox" data-act="selall"${allSel ? ' checked' : ''} aria-label="すべて選択"></th><th>組</th><th>番号</th><th>氏名</th><th>受験校</th><th>一般/併用</th><th>共テ利用</th><th>国公立</th><th>英検</th><th>共テ目標</th><th>第1志望</th><th>更新</th><th></th></tr></thead><tbody>
     ${list.map(s => { const ps = (s.picks || []).filter(p => p.status !== '取りやめ'); const k = n => ps.filter(p => n.includes(exOf(p).kind)).length; const r = kyoTotals(s.profile); const key = s.cls + '#' + s.no;
@@ -2092,7 +2112,7 @@ document.addEventListener('click', async e => {
   if (d.kuni) { STATE.kyo.uni = d.kuni; STATE.kyo.fq = ''; rerenderTab(); window.scrollTo({ top: 0 }); return; }
   if (d.ics) { STATE.icsTypes[t.checked ? 'add' : 'delete'](d.ics); return; }
   if (d.ttab) { STATE.teacher.tab = d.ttab; render(); return; }
-  if (d.sel) { STATE.teacher.sel[t.checked ? 'add' : 'delete'](d.sel); const b = $('[data-act="tprint"]'); if (b) b.textContent = `選んだ生徒の受験校一覧PDF・1人1枚（${STATE.teacher.sel.size}人）`; return; }
+  if (d.sel) { STATE.teacher.sel[t.checked ? 'add' : 'delete'](d.sel); const b = $('[data-act="tprint"]'); if (b) b.textContent = `選んだ生徒の受験校一覧PDF・1人1枚（${STATE.teacher.sel.size}人）`; const db = $('[data-act="tdelsel"]'); if (db) db.textContent = `選んだ生徒を削除（${STATE.teacher.sel.size}人）`; return; }
   if (d.detail) { STATE.teacher.detail = d.detail; STATE.teacher.addq = ''; render(); return; }
   if (d.tdel) { const x = M.byId[d.tdel]; if (!confirm(`${x ? label(x, true) + ' ' + x.met : 'この入試'} を削除しますか？`)) return; await tEdit(d.key, 'del', d.tdel); return; }
   if (d.tadd) { await tEdit(d.key, 'add', d.tadd); return; }
@@ -2160,6 +2180,7 @@ document.addEventListener('click', async e => {
     case 'chk-preview': if (STATE.teacher.chk && STATE.teacher.chk.wb) { ingestWorkbook(STATE.teacher.chk.wb); STATE.preview = true; render(); toast('この端末だけ、チェックしたデータで表示しています'); } break;
     case 'fb-pull': await fbPull(); break;
     case 'tdelstu': await tDeleteStudent(d.key); break;
+    case 'tdelsel': await tDeleteSelected(); break;
     case 'fb-logout': fbLogout(); STATE.teacher.fb = null; STATE.teacher.fbAutoDone = false; render(); break;
     case 'fb-rules-copy': { const ok = await copyText(fbRules(($('#fb-rule-email') || {}).value)); toast(ok ? 'ルールをコピーしました。Firebaseの「ルール」に貼り替えて「公開」を押してください' : 'コピーできませんでした'); break; }
     case 'fb-clean': {
