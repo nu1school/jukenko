@@ -390,6 +390,7 @@ function normDate(v) {
   return m ? `${m[1]}-${pad2(m[2])}-${pad2(m[3])}` : '';
 }
 function strHash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(16).padStart(8, '0'); }
+const APP_VER = '10/30-14:15';  // 画面の版（更新のたびに変える）
 const clsL = c => /^[A-Za-zＡ-Ｚ]$/.test(String(c)) ? `${c}組` : String(c ?? '');
 async function sha256(t) { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t)); return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join(''); }
 const GH_KEY = 'jukenko_planner_github_token';
@@ -1706,7 +1707,7 @@ function teacherHTML() {
   const t = STATE.teacher;
   const classes = [...new Set(t.students.map(s => s.cls))].sort((a, b) => String(a).localeCompare(String(b), 'ja', { numeric: true }));
   const tabs = [['list', '生徒一覧'], ['days', '日別の受験者'], ['ai', 'AI相談'], ['data', 'システム設定']];
-  return headerHTML('<span><b>教員ページ</b></span>', `<button class="btn sm ghost" data-act="logout">終了</button>`) +
+  return headerHTML(`<span><b>教員ページ</b> <small class="note" title="画面の版。古い版のときは再読み込みしてください">版 ${APP_VER}</small></span>`, `<button class="btn sm ghost" data-act="logout">終了</button>`) +
     `<div class="wrap"><nav class="tabs">${tabs.map(([k, l]) => `<button class="tab" aria-selected="${t.tab === k}" data-ttab="${k}">${l}</button>`).join('')}</nav>
     ${['list', 'days', 'ai'].includes(t.tab) ? importPanelHTML() : ''}
     ${['list', 'days'].includes(t.tab) ? `<div class="tools"><select class="inp" id="t-cls" style="width:auto"><option value="">全クラス</option>${classes.map(c => `<option${t.cls === c ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select>
