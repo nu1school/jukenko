@@ -2031,7 +2031,7 @@ async function checkFile(f) {
 }
 function picksCSVRows(list) {
   const out = [['組', '番号', '氏名', '区分', '大学', '学部', '学科', '方式', '種別', '試験日', '出願開始', '出願締切', '合格発表', '手続締切', '位置づけ', '結果', 'メモ', 'ボーダー偏差値', '共テボーダー', '共テ科目', '共テ配点', '個別科目', '個別配点', '確度', 'ID']];
-  for (const s of list) for (const p of (s.picks || [])) { const x = exOf(p); out.push([s.cls, s.no, s.name, x.grp, uniName(x.uni), facName(x.fac), depName(x.dep), x.met, x.kind, x.date, x.open, x.close, x.ann, x.proc, p.pref, p.status, p.memo, x.rank, x.bd, x.kt, x.kp, x.nt, x.np, x.conf, p.id]); }
+  for (const s of list) for (const p of planOrder(s.picks || [])) { const x = exOf(p); out.push([s.cls, s.no, s.name, x.grp, uniName(x.uni), facName(x.fac), depName(x.dep), x.met, x.kind, x.date, x.open, x.close, x.ann, x.proc, p.pref, p.status, p.memo, x.rank, x.bd, x.kt, x.kp, x.nt, x.np, x.conf, p.id]); }
   return out;
 }
 function studentsCSVRows(list) {
