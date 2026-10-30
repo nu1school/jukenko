@@ -37,6 +37,8 @@ def has(s, *keys):
 # u: 大学, f: 学部, g: 学科, m: 方式, d: 試験日(YYYY-MM-DD)
 # --------------------------------------------------------------------------------
 def general(u, f, g, m, d):
+    if u == '日本' and f == '医' and '地域枠' in (m or ''):
+        return R('', '', '', '', note='地域枠の出願期間・発表日は未公表（N方式第2期の医学部と同時期の見込み）。要項で確認', conf='要確認', src=BEN)
     x = md(d)
     if u == '早稲田':
         o, c = '1/6', '1/19'
@@ -167,7 +169,7 @@ def general(u, f, g, m, d):
         if '全国' in m:
             return R('1/4', '1/21', '2/10', '2/18', src=BEN)
         if '後期' in m:
-            return R('', '', '', '', note='2027年度の後期日程は未発表（2026年度は出願2/16〜2/25・試験3/3・発表3/11）', conf='要確認', src=BEN)
+            return R('2/15', '2/24', '3/11', '3/19', note='後期は学部・学科により実施しない場合あり（要項で確認）', src=BEN)
         late = f in ('経済', '商', 'ネットワーク情報') or (f == '文学' and has(g, '日本文学', '英語英米', 'ジャーナリズム'))
         return R('1/4', '1/29', '2/21' if late else '2/19', '2/26', src=BEN)
     return None
@@ -464,11 +466,11 @@ def kyotest(u, f, g, m):
         if '中期' in m:
             return R('2/8', '2/16', '3/3', '3/5', src=BEN)
         if '後期' in m:
-            return R('', '', '', '', note='2027年度の後期日程は要確認', conf='要確認', src=BEN)
+            return R('2/8', '2/19', '3/13', '3/19', src=BEN)
         return R('1/5', '1/15', '2/15', '2/25', src=BEN)
     if u == '専修':
         if '後期' in m:
-            return R('', '', '', '', note='2027年度未発表（2026年度は出願2/16〜3/6・発表3/16）', conf='前年参考', src=BEN)
+            return R('2/15', '3/5', '3/16', '3/19', src=BEN)
         return R('1/4', '1/15', '2/13', '2/22', src=BEN)
     if u == '星薬科':
         return R('1/3', '1/15', '2/10', '2/18', src=BEN)
@@ -478,8 +480,18 @@ def kyotest(u, f, g, m):
         return R('1/4', '1/15', '2/12', '2/22', src=BEN)
     if u == '昭和薬科':
         return R('12/14', '1/15', '2/10', '2/25', src=BEN)
-    if u == '東邦' and f == '薬' and '前期' in m:
+    if u == '東邦' and f == '薬':
         return R('12/14', '1/15', '2/10', '2/17', src=BEN)
+    if u == '明治薬科':
+        if '地域枠' in m:
+            return R('1/4', '1/16', '2/15', '2/19', src=BEN)
+        return R('1/4', '1/18' if 'Ｃ' in m else '1/16', '2/12', '2/18', src=BEN)
+    if u == '聖路加国際':
+        return R('12/18', '1/19', '2/12', '2/19', src=BEN)
+    if u == '日本赤十字看護' and f.startswith('さいたま'):
+        if m.startswith('Ⅰ'):
+            return R('12/24', '1/15', '2/15', '2/24', src=BEN)
+        return R('', '', '', '', note='2027年度未発表（看護学部の同じ方式は2026年度：出願2月中旬・発表3/6）', conf='前年参考', src=BEN)
     if u == '日本赤十字看護' and f == '看護':
         if m.startswith('Ⅰ'):
             return R('12/24', '1/15', '2/18', '2/26', src=BEN)
