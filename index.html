@@ -1715,6 +1715,7 @@ function tListHTML() {
   return `<div class="tools"><button class="btn" data-act="csv-picks">受験校一覧CSV（1行1受験）</button><button class="btn" data-act="csv-students">生徒一覧CSV（1行1生徒）</button>
     <button class="btn primary" data-act="tprint">選んだ生徒の受験校一覧PDF・1人1枚（${[...t.sel].length}人）</button><label style="font-size:13px"><input type="checkbox" id="t-withcal"${STATE.pdfCal ? ' checked' : ''}> カレンダーも付ける</label>${fbReady() ? `<button class="btn ghost danger" data-act="tdelsel" style="margin-left:auto">選んだ生徒を削除（${[...t.sel].length}人）</button>` : ''}<span class="note" style="flex-basis:100%">CSVは表示中のクラス・検索結果が対象です。</span></div>
     ${classPdfHTML()}
+    ${customListHTML()}
     <div class="tbl-wrap" style="border:1px solid var(--line);border-radius:var(--r)"><table class="ttable"><thead><tr><th><input type="checkbox" data-act="selall"${allSel ? ' checked' : ''} aria-label="すべて選択"></th><th>組</th><th>番号</th><th>氏名</th><th>受験校</th><th>一般/併用</th><th>共テ利用</th><th>国公立</th><th>英検</th><th>共テ目標</th><th>第1志望</th><th>更新</th><th></th></tr></thead><tbody>
     ${list.map(s => { const ps = (s.picks || []).filter(p => p.status !== '取りやめ'); const k = n => ps.filter(p => n.includes(exOf(p).kind)).length; const r = kyoTotals(s.profile); const key = s.cls + '#' + s.no;
       return `<tr><td><input type="checkbox" data-sel="${esc(key)}"${t.sel.has(key) ? ' checked' : ''} aria-label="選択"></td><td>${esc(s.cls)}</td><td class="num">${esc(s.no)}</td><td><b>${esc(s.name)}</b>${fbReady() && s.sid ? `<div class="note" style="margin:0">${esc(subState(s))}</div>` : ''}</td><td class="num">${ps.length}</td><td class="num">${k(['一般', '共テ併用'])}</td><td class="num">${k(['共テ利用'])}</td><td class="num">${k(['国公立'])}</td>
@@ -1734,6 +1735,24 @@ function classPdfHTML() {
     <div class="tools" style="margin:0">${cs.map(c => `<button class="btn" data-act="clspdf" data-cls="${esc(c)}">${esc(clsL(c))}（${n(c)}人）</button>`).join('')}
       <button class="btn ghost" data-act="clspdf" data-cls="">全クラス（クラスごとに改ページ）</button></div>
     <p class="note" style="margin:6px 0 0">印刷画面で「PDFに保存」を選ぶとPDFになります。1人1枚の形式は「カレンダーも付ける」の設定に従います。</p></div>`;
+}
+/* 生徒が自由記入した大学の一覧（大学データへの追加候補） */
+function customRows() {
+  const by = {};
+  STATE.teacher.students.forEach(s => (s.picks || []).forEach(p => {
+    if (!p.custom && !(p.snap && p.snap.custom)) return;
+    const x = exOf(p); const k = [x.uni, x.fac || '', x.dep || '', x.met || '', x.kind || ''].join('|');
+    (by[k] = by[k] || { x, who: [] }).who.push(`${clsL(s.cls)}${s.no}番 ${s.name}`);
+  }));
+  return Object.values(by).sort((a, b) => a.x.uni.localeCompare(b.x.uni, 'ja') || (a.x.date || '').localeCompare(b.x.date || ''));
+}
+function customListHTML() {
+  const rs = customRows(); if (!rs.length) return '';
+  return `<details class="panel"><summary style="cursor:pointer"><b>生徒が自由記入した大学（${rs.length}件）</b><span class="note" style="margin-left:8px">大学データにない入試。追加の候補です</span></summary>
+    <div class="tools" style="margin:8px 0"><button class="btn sm" data-act="copy-custom">一覧をコピー</button><span class="note">コピーして送ってもらえれば、大学データに追加できます。</span></div>
+    <div class="tbl-wrap"><table class="ttable"><thead><tr><th>大学</th><th>学部・学科</th><th>方式</th><th>種別</th><th>試験日</th><th>出願締切</th><th>発表</th><th>入れた生徒</th></tr></thead><tbody>
+    ${rs.map(({ x, who }) => `<tr><td><b>${esc(x.uni)}</b></td><td>${esc([x.fac, x.dep].filter(Boolean).join(' '))}</td><td>${esc(x.met)}</td><td>${esc(x.kind)}</td><td class="num">${esc(fmt(x.date) || '')}</td><td class="num">${esc(fmt(x.close) || '')}</td><td class="num">${esc(fmt(x.ann) || '')}</td><td style="font-size:12px">${esc(who.join('、'))}</td></tr>`).join('')}
+    </tbody></table></div></details>`;
 }
 const PREF_S = { 'チャレンジ': 'チ', '実力相応': '実', '安全': '安' };
 function classSumHTMLFor(cls, list) {
@@ -2219,6 +2238,10 @@ document.addEventListener('click', async e => {
     }
     case 'selall': { const list = tFiltered(); list.forEach(s => STATE.teacher.sel[t.checked ? 'add' : 'delete'](s.cls + '#' + s.no)); render(); break; }
     case 'tprint': { const list = STATE.teacher.students.filter(s => STATE.teacher.sel.has(s.cls + '#' + s.no)); if (!list.length) { toast('左のチェックで生徒を選んでください'); break; } doPrint(list.sort((a, b) => String(a.cls).localeCompare(String(b.cls), 'ja', { numeric: true }) || a.no - b.no), STATE.pdfCal ? '' : 'list'); break; }
+    case 'copy-custom': {
+      const txt = ['大学\t学部\t学科\t方式\t種別\t試験日\t出願締切\t合格発表\t人数'].concat(customRows().map(({ x, who }) => [x.uni, x.fac || '', x.dep || '', x.met || '', x.kind || '', x.date || '', x.close || '', x.ann || '', who.length].join('\t'))).join('\n');
+      try { await navigator.clipboard.writeText(txt); toast('コピーしました'); } catch (e) { prompt('コピーできなかったので、ここから選んでコピーしてください', txt); }
+      break; }
     case 'clspdf': {
       const list = STATE.teacher.students.filter(s => !d.cls || s.cls === d.cls).sort((a, b) => String(a.cls).localeCompare(String(b.cls), 'ja', { numeric: true }) || a.no - b.no);
       if (!list.length) { toast('このクラスの生徒がいません'); break; }

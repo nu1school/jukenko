@@ -200,7 +200,7 @@ if border_p and full_p:
         byfac[(b['大学名'], (b['学部名'] or '').split('（')[0])].append(b)
     for z in rows:
         if z.get('added'):
-            bs = byfac.get((z['u'], z['f'].split('（')[0]), [])
+            bs = byfac.get((z['u'], z['f'].split('（')[0]), []) or byfac.get((z['u'], ''), [])
             bs = [b for b in bs if b['学科名'] == z['g']] or bs
             if z['kind'] == '共テ利用':
                 v = sorted(int(b['共通テストボーダーライン(得点率)']) for b in bs if str(b.get('共通テストボーダーライン(得点率)')) not in ('None', ''))
@@ -246,7 +246,7 @@ w2 = wb.create_sheet('大学')
 w2.append(['大学', '表示名', '略称', '区分', '国私'])
 for g, us in GROUPS.items():
     for u in us:
-        disp = u if u.endswith('大学') else (u + '大学' if u not in ('慶應義塾',) else '慶應義塾大学')
+        disp = u if (u.endswith('大学') or u.endswith('大学校')) else (u + '大学' if u not in ('慶應義塾',) else '慶應義塾大学')
         if u == '東京慈恵会医科':
             disp = '東京慈恵会医科大学'
         w2.append([u, disp, ABBR.get(u, u), g, '国公立' if g == '国公立' else '私立'])
