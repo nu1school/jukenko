@@ -112,9 +112,11 @@ for h in H:
         if res is None:
             unmatched[(u, f, 'G:' + m)] += 1
             continue
-        kind = '共テ併用' if '共通テスト併用' in ''.join(rr['note'] for _, rr in res) else '一般'
-        for d, r in res:
-            add(u=u, f=f, g=g, m=mname, kind=kind, date=D(d), rank='', r=r, note=r['note'], src2='Kei-Net科目・配点')
+        kind = '共テ併用' if '共通テスト併用' in ''.join(t[1]['note'] for t in res) else '一般'
+        for t in res:
+            d, r = t[0], t[1]
+            add(u=u, f=f, g=g, m=mname, kind=kind, date=D(d), rank='', r=r, note=r['note'], src2='Kei-Net科目・配点',
+                idDate=D(t[2]) if len(t) > 2 else None)  # 試験日を直した行は、生徒の選択が切れないよう元のIDを保つ
 
 # ---------- 4. 国公立 ----------
 seen3 = set()
@@ -165,7 +167,7 @@ order_u = [u for us in GROUPS.values() for u in us]
 rows.sort(key=lambda z: (order_g.index(GROUP_OF[z['u']]), order_u.index(z['u']), z['kind'] == '共テ利用', z['f'], z['g'], z['date'] or '9', z['m']))
 ids = set()
 for z in rows:
-    base = '|'.join([z['u'], z['f'], z['g'], z['m'], z['kind'], z['date']])
+    base = '|'.join([z['u'], z['f'], z['g'], z['m'], z['kind'], z.get('idDate') or z['date']])
     i = hashlib.md5(base.encode()).hexdigest()[:8]
     while i in ids:
         i = hashlib.md5((base + i).encode()).hexdigest()[:8]

@@ -158,6 +158,7 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .warns{display:grid;gap:4px;margin-top:8px}
 .w{font-size:12.5px;border-radius:6px;padding:4px 8px;background:var(--warn-soft);color:var(--warn)}
 .w.bad{background:var(--danger-soft);color:var(--danger)}
+.w.okw{background:var(--c-ann-soft);color:var(--c-ann)}
 .note{font-size:12px;color:var(--muted);margin-top:4px}
 .empty{background:var(--surface);border:1px dashed var(--line);border-radius:var(--r);padding:22px;text-align:center;color:var(--muted)}
 .empty b{color:var(--ink)}
@@ -848,14 +849,17 @@ const FIELD_LIST = ['理工・情報', '医療・看護', '薬学', '国際・�
 function fieldClass(t) {
   if (!t) return null;
   if (/薬/.test(t)) return '薬学';
-  if (/看護|医療|保健|^医$|医学|歯|衛生|放射線|リハビリ|臨床/.test(t)) return '医療・看護';
-  if (/工学|理工|工$|システム工/.test(t)) return '理工・情報';
-  if (/国際|外国語|グローバル|異文化|英語|英米|ドイツ|フランス|中国|スペイン|言語|語学|語$|観光/.test(t)) return '国際・語学';
-  if (/経済|経営|商|会計|ビジネス|金融|マーケティング/.test(t)) return '経済・経営';
-  if (/法|政治|政策|政経|危機管理/.test(t)) return '法・政治';
-  if (!/情報コミュニケーション|社会情報|総合情報|人間環境|人間科学|心理|教育|社会|文化|地理/.test(t) &&
-      /理|工|情報|数|建築|デザイン|農|生命|生物|環境|科学|データ|海洋|獣医|物理|化学|機械|電気|電子|メディア|宇宙|食|先進|創域|基幹|創造/.test(t)) return '理工・情報';
-  if (/文|教育|心理|社会|人間|福祉|神|仏教|史|哲|コミュニティ|芸|スポーツ|現代|教養|子ども|情報コミュニケーション|地理/.test(t)) return '文・教育・心理';
+  if (/保健体育|臨床心理|臨床教育/.test(t)) return '文・教育・心理';
+  if (/看護|医療|保健|^医(（|$)|医学|歯|衛生|放射線|リハ|療法|臨床|検査技術|メディカル|ヒューマンケア|栄養/.test(t)) return '医療・看護';
+  if (/(?<![外中])国語|小学校|初等|中等|中学|^学校－|^教科－|^小中－|教育/.test(t)) return '文・教育・心理';
+  if (/工学|理工|工$|システム工|コンピュータ|園芸|社会基盤|データ科学|インダストリアル|建築/.test(t)) return '理工・情報';
+  if (/法|政治|政策|政経|危機管理/.test(t) && !/経済/.test(t)) return '法・政治';
+  if (/経済|経営|商|会計|ビジネス|金融|マーケティング|ファイナンス/.test(t)) return '経済・経営';
+  if (/国際|外国語|グローバル|異文化|英語|英米|英文|ドイツ|フランス|中国|スペイン|言語|語学|語$|観光/.test(t)) return '国際・語学';
+  if (/スポーツ|体育|楽理|音楽|工芸|芸術|美術|図書館|人文|行動科学|キャリアデザイン|メディアコミュニケーション|文芸|障害科学|福祉|健康$/.test(t)) return '文・教育・心理';
+  if (!/情報コミュニケーション|社会情報|総合情報|人間環境|人間科学|心理|社会|文化|地理/.test(t) &&
+      /理|工|情報|数|デザイン|農|生命|生物|環境|科学|データ|海洋|獣医|物理|化学|機械|電気|電子|メディア|宇宙|食|先進|創域|基幹|創造/.test(t)) return '理工・情報';
+  if (/文|教育|心理|社会|人間|福祉|神|仏教|史|哲|コミュニティ|芸|スポーツ|現代|教養|子ども|情報コミュニケーション|地理|児童|家政|リベラル|キャリア|コミュニケ/.test(t)) return '文・教育・心理';
   return null;
 }
 function fieldOf(x) {
@@ -948,7 +952,8 @@ const EV = { apply: '出願締切', exam: '試験', ann: '合格発表', proc: '
 
 function exOf(p) {
   const base = M.byId[p.id] || p.snap || {};
-  return Object.assign({}, base, { date: p.date !== undefined && p.date !== null ? p.date : base.date });
+  const own = p.date !== undefined && p.date !== null && !(M.byId[p.id] && p.snap && p.date === p.snap.date);  // 生徒が自分で変えた試験日だけを優先
+  return Object.assign({}, base, { date: own ? p.date : base.date });
 }
 function snapOf(x) { const { src, ...r } = x; return r; }
 function eventsOf(p) {
@@ -1154,11 +1159,24 @@ function tabBody() {
 }
 
 /* ---------- 受験予定 ---------- */
+/* 同じ日の2つの入試が「同じ試験（1回の受験で併願できる）」かどうか */
+const UNIFIED_RE = /全学|統一|共通|Ｎ全学|Ｎ方式|N方式|Ｔ日程|Ｔ方式|自由選択|学部共通|個別学部併願/;
+function sittingOf(a, b) {
+  if (a.uni !== b.uni) return 'other';
+  const note = (a.note || '') + (b.note || '');
+  if (/同時に受験可|同時受験可/.test(note)) return 'same';
+  if (a.met === b.met && (a.fac === b.fac || UNIFIED_RE.test(a.met))) return 'same';
+  return 'maybe';
+}
 function warningsFor(p, ps) {
   const x = exOf(p); const out = [];
   if (x.kind !== '共テ利用' && x.date) {
-    const same = ps.filter(q => q !== p && exOf(q).kind !== '共テ利用' && exOf(q).date === x.date);
-    if (same.length) out.push({ bad: true, t: `${fmt(x.date)}に ${same.map(q => label(exOf(q), true)).join('、')} とも重なっています` });
+    const same = ps.filter(q => q !== p && !['取りやめ', '不合格'].includes(q.status) && exOf(q).kind !== '共テ利用' && exOf(q).date === x.date);
+    const lv = same.map(q => [q, sittingOf(x, exOf(q))]);
+    const L = k => lv.filter(v => v[1] === k).map(v => label(exOf(v[0]), true)).join('、');
+    if (L('other')) out.push({ bad: true, t: `${fmt(x.date)}に ${L('other')} とも重なっています` });
+    if (L('maybe')) out.push({ t: `${fmt(x.date)}に同じ大学の ${L('maybe')} もあります。同じ日に両方受けられるか（同じ試験で併願できるか）を要項で確認しましょう` });
+    if (L('same')) out.push({ ok: true, t: `${L('same')} と同じ試験です。1回の受験で複数の学科に出願できる方式です（併願の条件・検定料は要項で確認）` });
   }
   if (x.close && x.close < today && !p.status) out.push({ bad: true, t: `出願締切（${fmt(x.close)}）を過ぎています` });
   else if (x.close && !p.status) {
@@ -1192,7 +1210,7 @@ function pickHTML(p, ps) {
       <input class="memo" data-f="memo" placeholder="メモ（受験会場・併願の理由など）" value="${esc(p.memo || '')}">
       <button class="btn sm ghost danger" data-act="del">削除</button>
     </div>
-    ${ws.length ? `<div class="warns">${ws.map(w => `<div class="w${w.bad ? ' bad' : ''}">${esc(w.t)}</div>`).join('')}</div>` : ''}
+    ${ws.length ? `<div class="warns">${ws.map(w => `<div class="w${w.bad ? ' bad' : w.ok ? ' okw' : ''}">${esc(w.t)}</div>`).join('')}</div>` : ''}
   </div></article>`;
 }
 function planHTML() {
@@ -1830,7 +1848,7 @@ function studentBrief(s, hide) {
     L.push(`- ${x.kind === '共テ利用' ? '共テ利用' : fmt(x.date)}｜${label(x)}｜${x.met}（${x.kind}）｜ボーダー ${borderText(x) || '不明'}${subjText(x) ? `｜科目 ${subjText(x)}` : ''}｜出願締切 ${fmt(x.close) || '要確認'}｜発表 ${fmt(x.ann) || '要確認'}｜手続締切 ${fmt(x.proc) || '要確認'}｜位置づけ ${p.pref || '未入力'}｜結果 ${p.status || '未定'}${p.memo ? `｜本人メモ：${p.memo}` : ''}`);
   });
   if (!ps.length) L.push('（まだ登録なし）');
-  const warns = [...new Set(ps.flatMap(p => warningsFor(p, ps).map(w => w.t)))];
+  const warns = [...new Set(ps.flatMap(p => warningsFor(p, ps).filter(w => !w.ok).map(w => w.t)))];
   if (warns.length) L.push('', '日程の注意点（システムが検出）：', ...warns.map(w => '- ' + w));
   return L.join('\n');
 }
