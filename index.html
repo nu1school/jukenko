@@ -1551,9 +1551,14 @@ function profileHTML() {
 /* ============================================================
    書き出し：PDF（印刷）・ics
    ============================================================ */
+/* 受験予定の並び順：試験日順 → 最後に共テ利用（合格発表順）。取りやめ・不合格はそれぞれの中で後ろへ */
+function planOrder(ps) {
+  const key = p => { const x = exOf(p); return [x.kind === '共テ利用' ? 1 : 0, (x.kind === '共テ利用' ? (x.ann || x.close) : (x.date || x.ann)) || '9', x.uni || '']; };
+  return ps.slice().sort((a, b) => { const A = key(a), B = key(b); return A[0] - B[0] || A[1].localeCompare(B[1]) || A[2].localeCompare(B[2], 'ja'); });
+}
 function printHTMLFor(st, listOnly) {
   const ps = (st.picks || []).filter(p => p.status !== '取りやめ');
-  const rows = ps.slice().sort((a, b) => { const A = exOf(a), B = exOf(b); return (A.kind === '共テ利用') - (B.kind === '共テ利用') || (A.date || A.ann || '9').localeCompare(B.date || B.ann || '9'); });
+  const rows = planOrder(ps);
   const pf = st.profile || {}; const r = kyoTotals(pf);
   const ext = (pf.ext || []).filter(e => e.type).map(e => `${e.type} ${e.score || ''}`).join('、');
   const evMap = {}; ps.flatMap(eventsOf).forEach(e => (evMap[e.date] = evMap[e.date] || []).push(e));
@@ -1779,14 +1784,14 @@ function classSumHTMLFor(cls, list) {
 }
 function tDetailHTML(key) {
   const s = STATE.teacher.students.find(x => x.cls + '#' + x.no === key); if (!s) return '';
-  const ps = (s.picks || []).slice().sort((a, b) => (exOf(a).date || exOf(a).ann || '9').localeCompare(exOf(b).date || exOf(b).ann || '9'));
+  const ps = planOrder(s.picks || []);
   const pf = s.profile || {};
   return `<div class="drawer" data-act="closedetail"><div class="in" data-stop="1">
     <div class="uhead"><button class="btn sm" data-act="closedetail">閉じる</button><h2>${esc(clsL(s.cls))} ${esc(s.no)}番 ${esc(s.name)}</h2><span class="chip">${esc(subState(s))}</span><button class="btn sm primary" data-act="tprint1" data-key="${esc(key)}">PDF</button>${fbReady() ? `<button class="btn sm ghost danger" data-act="tdelstu" data-key="${esc(key)}" style="margin-left:auto">この生徒を削除</button>` : ''}</div>
     <div class="panel" style="margin-bottom:12px;font-size:14px"><div>英検：${esc(pf.eiken || '—')} ${pf.cse ? `CSE ${esc(pf.cse)}` : ''} ${(pf.ext || []).filter(e => e.type).map(e => esc(e.type + ' ' + (e.score || ''))).join('、')}</div>
       <div>${kyoTotalText(pf)}（共テ${pf.kyoTake === false ? '受験しない' : '受験する'}）</div><div>第1志望：${esc(pf.hope1 || '—')}　系統：${esc(pf.field || '—')}</div>${(pf.subj || []).length ? `<div>受験科目：${esc(subjNames(pf.subj))}</div>` : ''}${pf.memo ? `<div class="notice info" style="margin-bottom:0">生徒から：${esc(pf.memo)}</div>` : ''}</div>
     <div class="tbl-wrap"><table class="ex"><thead><tr><th>試験日</th><th>大学・学部・学科</th><th>方式</th><th>出願締切</th><th>発表</th><th>手続</th><th>位置づけ</th><th>結果</th><th>メモ</th><th></th></tr></thead><tbody>
-    ${ps.map(p => { const x = exOf(p); const w = warningsFor(p, ps.filter(q => q.status !== '取りやめ')).filter(w => w.bad); return `<tr><td class="d">${x.kind === '共テ利用' ? '共テ利用' : fmt(x.date)}</td><td>${esc(label(x))}${w.length ? `<div class="w bad">${esc(w.map(z => z.t).join(' / '))}</div>` : ''}</td><td>${esc(x.met)}${subjText(x) || borderText(x) ? `<div class="note">${esc([borderText(x), subjText(x)].filter(Boolean).join('／'))}</div>` : ''}</td><td class="d">${fmt(x.close)}</td><td class="d">${fmt(x.ann)}</td><td class="d">${fmt(x.proc)}</td><td>${esc(p.pref || '—')}</td><td>${esc(p.status || '—')}</td><td>${esc(p.memo || '')}</td><td>${fbReady() ? `<button class="btn sm ghost danger" data-tdel="${esc(p.id)}" data-key="${esc(key)}"${STATE.teacher.saving ? ' disabled' : ''}>削除</button>` : ''}</td></tr>`; }).join('') || '<tr><td colspan="10">未登録</td></tr>'}
+    ${ps.map((p, i) => { const x = exOf(p); const w = warningsFor(p, ps.filter(q => q.status !== '取りやめ')).filter(w => w.bad); const sep = x.kind === '共テ利用' && (i === 0 || exOf(ps[i - 1]).kind !== '共テ利用') ? `<tr><td colspan="10" style="background:var(--sunken);font-weight:700;font-size:12.5px">共通テスト利用（大学独自の試験日なし・合格発表順）</td></tr>` : ''; return `${sep}<tr><td class="d">${x.kind === '共テ利用' ? '共テ利用' : fmt(x.date)}</td><td>${esc(label(x))}${w.length ? `<div class="w bad">${esc(w.map(z => z.t).join(' / '))}</div>` : ''}</td><td>${esc(x.met)}${subjText(x) || borderText(x) ? `<div class="note">${esc([borderText(x), subjText(x)].filter(Boolean).join('／'))}</div>` : ''}</td><td class="d">${fmt(x.close)}</td><td class="d">${fmt(x.ann)}</td><td class="d">${fmt(x.proc)}</td><td>${esc(p.pref || '—')}</td><td>${esc(p.status || '—')}</td><td>${esc(p.memo || '')}</td><td>${fbReady() ? `<button class="btn sm ghost danger" data-tdel="${esc(p.id)}" data-key="${esc(key)}"${STATE.teacher.saving ? ' disabled' : ''}>削除</button>` : ''}</td></tr>`; }).join('') || '<tr><td colspan="10">未登録</td></tr>'}
     </tbody></table></div>
     ${fbReady() ? `<details class="panel" style="margin-top:12px"${STATE.teacher.addq ? ' open' : ''}><summary style="cursor:pointer;font-weight:700">受験校を追加する</summary>
       <input id="t-addq" class="inp" data-key="${esc(key)}" placeholder="大学名・学部・方式で探す（例：明治 理工）" value="${esc(STATE.teacher.addq || '')}" style="margin-top:8px">
@@ -1863,7 +1868,7 @@ function studentBrief(s, hide) {
   if ((pf.subj || []).length) L.push(`受験科目：${subjNames(pf.subj)}`);
   if (pf.memo) L.push(`本人の不安・相談したいこと：${pf.memo}`);
   L.push('', '受験予定（試験日順）：');
-  ps.slice().sort((a, b) => (exOf(a).date || exOf(a).ann || '9').localeCompare(exOf(b).date || exOf(b).ann || '9')).forEach(p => {
+  planOrder(ps).forEach(p => {
     const x = exOf(p);
     L.push(`- ${x.kind === '共テ利用' ? '共テ利用' : fmt(x.date)}｜${label(x)}｜${x.met}（${x.kind}）｜ボーダー ${borderText(x) || '不明'}${subjText(x) ? `｜科目 ${subjText(x)}` : ''}｜出願締切 ${fmt(x.close) || '要確認'}｜発表 ${fmt(x.ann) || '要確認'}｜手続締切 ${fmt(x.proc) || '要確認'}｜位置づけ ${p.pref || '未入力'}｜結果 ${p.status || '未定'}${p.memo ? `｜本人メモ：${p.memo}` : ''}`);
   });
