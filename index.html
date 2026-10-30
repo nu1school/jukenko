@@ -324,6 +324,7 @@ table.ex tr.added td:last-child{background:var(--c-exam-soft)}
   .pp th{background:#e8edf6;text-align:left;padding:1.2mm 1.5mm;border:0.4pt solid #b9c3d3;white-space:nowrap}
   .pp td{border:0.4pt solid #c9d0dc;padding:1.2mm 1.5mm;vertical-align:top}
   .pp td.d,.pp td.nw{white-space:nowrap}
+  .pp tr.sep td{background:#eef1f6;border-top:1.2pt solid #555;font-size:8.6pt}
   .pp h2{font-size:12pt;margin:4mm 0 2mm}
   .pp .pm{display:grid;grid-template-columns:repeat(2,1fr);gap:4mm}
   .pp .pcal{width:100%;border-collapse:collapse;table-layout:fixed}
@@ -1578,7 +1579,7 @@ function printHTMLFor(st, listOnly) {
     <div class="prof"><div>英検：${esc(pf.eiken || '—')}${pf.cse ? `（CSE ${esc(pf.cse)}）` : ''}${ext ? `／${esc(ext)}` : ''}</div><div>共テ目標：${r.mx ? `${r.tg}/${r.mx}点（${Math.round(r.tg / r.mx * 100)}%）` : '—'}${r.mkMax ? `　直近模試 ${r.mk}/${r.mkMax}` : ''}</div>
     <div>第1志望：${esc(pf.hope1 || '—')}</div><div>志望系統：${esc(pf.field || '—')}</div>${(pf.subj || []).length ? `<div style="grid-column:1/-1">受験科目：${esc(subjNames(pf.subj))}</div>` : ''}</div>
     <table><thead><tr><th>試験日</th><th>大学・学部・学科</th><th>方式</th><th>出願期間</th><th>合格発表</th><th>手続締切</th><th>位置づけ</th><th>結果</th></tr></thead><tbody>
-    ${rows.map(p => { const x = exOf(p); return `<tr><td class="d">${x.kind === '共テ利用' ? '共テ利用' : (fmt(x.date) || '—')}</td><td>${esc(label(x))}</td><td>${esc(x.met)}${br}<small>${esc(x.kind)}${borderText(x) ? '・' + esc(borderText(x)) : ''}</small>${subjText(x) ? `<small class="sj">${esc(subjText(x, ' ／ '))}</small>` : ''}</td><td class="d">${x.open ? fmt(x.open, false) + '〜' : ''}${fmt(x.close) || '要確認'}</td><td class="d">${fmt(x.ann) || '要確認'}</td><td class="d">${fmt(x.proc) || '要確認'}</td><td class="nw">${esc(p.pref || '—')}</td><td class="nw">${esc(p.status || '—')}${p.memo ? `${br}<small style="white-space:normal">${esc(p.memo)}</small>` : ''}</td></tr>`; }).join('') || '<tr><td colspan="8">登録なし</td></tr>'}
+    ${rows.map((p, i) => { const x = exOf(p); const sep = x.kind === '共テ利用' && (i === 0 || exOf(rows[i - 1]).kind !== '共テ利用') ? `<tr class="sep"><td colspan="8"><b>共通テスト利用（大学独自の試験日なし・合格発表順）</b></td></tr>` : ''; return `${sep}<tr><td class="d">${x.kind === '共テ利用' ? '共テ利用' : (fmt(x.date) || '—')}</td><td>${esc(label(x))}</td><td>${esc(x.met)}${br}<small>${esc(x.kind)}${borderText(x) ? '・' + esc(borderText(x)) : ''}</small>${subjText(x) ? `<small class="sj">${esc(subjText(x, ' ／ '))}</small>` : ''}</td><td class="d">${x.open ? fmt(x.open, false) + '〜' : ''}${fmt(x.close) || '要確認'}</td><td class="d">${fmt(x.ann) || '要確認'}</td><td class="d">${fmt(x.proc) || '要確認'}</td><td class="nw">${esc(p.pref || '—')}</td><td class="nw">${esc(p.status || '—')}${p.memo ? `${br}<small style="white-space:normal">${esc(p.memo)}</small>` : ''}</td></tr>`; }).join('') || '<tr><td colspan="8">登録なし</td></tr>'}
     </tbody></table>
     <p class="foot">日程は大学データ（${esc(M.settings.updated || '')}時点）によるものです。出願前に必ず各大学の募集要項で確認してください。</p></section>`;
   if (listOnly) return head;
