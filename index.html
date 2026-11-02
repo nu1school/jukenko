@@ -160,6 +160,9 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .w.bad{background:var(--danger-soft);color:var(--danger)}
 .w.okw{background:var(--c-ann-soft);color:var(--c-ann)}
 .note{font-size:12px;color:var(--muted);margin-top:4px}
+.mp{font-size:11.5px;line-height:1.45;margin-top:4px;color:var(--ink,inherit)}
+.mp b{font-weight:700;font-size:11px;border:1px solid currentColor;border-radius:4px;padding:0 4px;margin-right:4px;opacity:.75}
+.mpnote{font-size:12px;color:var(--muted);margin:6px 0 8px}
 .empty{background:var(--surface);border:1px dashed var(--line);border-radius:var(--r);padding:22px;text-align:center;color:var(--muted)}
 .empty b{color:var(--ink)}
 .side{position:sticky;top:calc(env(safe-area-inset-top,0px) + 70px);display:grid;gap:14px}
@@ -390,7 +393,7 @@ function normDate(v) {
   return m ? `${m[1]}-${pad2(m[2])}-${pad2(m[3])}` : '';
 }
 function strHash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(16).padStart(8, '0'); }
-const APP_VER = '10/30-14:15';  // 画面の版（更新のたびに変える）
+const APP_VER = '11/02-最低点';  // 画面の版（更新のたびに変える）
 const clsL = c => /^[A-Za-zＡ-Ｚ]$/.test(String(c)) ? `${c}組` : String(c ?? '');
 async function sha256(t) { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t)); return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join(''); }
 const GH_KEY = 'jukenko_planner_github_token';
@@ -788,6 +791,11 @@ function subjText(x, sep = '／') {
   if (x.nt) a.push(`${x.kind === '国公立' ? '2次' : '個別'}${x.np ? x.np + '点' : ''}：${x.nt}`);
   return a.join(sep);
 }
+/* 合格最低点（旺文社・2026年入試の実績） */
+const MP_LABEL = '昨年の合格最低点';
+const MP_NOTE = '「昨年の合格最低点」は旺文社「2026年 合格最低点」より（2026年入試の実績）。％は得点率、「※換算」は大学が得点調整・換算した点です。年度や方式で問題・配点が変わるので、目安として見てください。';
+function mpText(x) { return x && x.mp ? x.mp : ''; }
+function mpHTML(x) { return x && x.mp ? `<div class="mp"><b>${MP_LABEL}</b> ${esc(x.mp)}</div>` : ''; }
 function borderText(x) {
   const a = [];
   if (x.rank) a.push(/設定/.test(x.rank) ? '偏差値 設定なし' : '偏差値 ' + x.rank);
@@ -806,7 +814,8 @@ function ingestWorkbook(wb) {
       close: normDate(r['出願締切']), ann: normDate(r['合格発表']), proc: normDate(r['手続締切']),
       field: String(r['分野'] || '').trim(), rank: String(r['ボーダー偏差値'] || r['偏差値帯'] || '').trim(), bd: normPct(r['共テボーダー']),
       kt: String(r['共テ科目'] || '').trim(), kp: String(r['共テ配点'] || '').trim(), nt: String(r['個別科目'] || '').trim(), np: String(r['個別配点'] || '').trim(), req: String(r['科目要件'] || '').trim(),
-      note: String(r['備考'] || '').trim(), conf: String(r['確度'] || '').trim(), src: String(r['出典'] || '').trim()
+      note: String(r['備考'] || '').trim(), conf: String(r['確度'] || '').trim(), src: String(r['出典'] || '').trim(),
+      mp: String(r['合格最低点'] || '').trim()
     };
     if (!x.uni) continue;
     if (!x.id) x.id = 'x' + strHash([x.uni, x.fac, x.dep, x.met, x.kind, x.date].join('|'));
@@ -1204,6 +1213,7 @@ function pickHTML(p, ps) {
     <div class="chips"><span class="chip k-${esc(x.kind)}">${esc(x.kind)}</span><span class="chip">${esc(x.met)}</span>${borderText(x) ? `<span class="chip">${esc(borderText(x))}</span>` : ''}${x.conf && !/確定/.test(x.conf) ? `<span class="chip conf">${esc(x.conf)}</span>` : ''}</div>
     <div class="dates"><span class="t-apply"><i>出願</i>${x.open ? fmt(x.open, false) + '〜' : ''}${x.close ? fmt(x.close) : '要確認'}</span><span class="t-ann"><i>発表</i>${x.ann ? fmt(x.ann) : '要確認'}</span><span class="t-proc"><i>手続</i>${x.proc ? fmt(x.proc) : '要確認'}</span></div>
     ${subjText(x) ? `<div class="sjline">${subjHTML(x)}</div>` : ''}
+    ${mpHTML(x)}
     ${x.note ? `<div class="note">${esc(x.note)}</div>` : ''}
     <div class="ctrls">
       <label style="font-size:12px;color:var(--muted)">位置づけ <select data-f="pref">${PREFS.map(v => `<option value="${v}"${p.pref === v ? ' selected' : ''}>${v || '未入力'}</option>`).join('')}</select></label>
@@ -1312,7 +1322,7 @@ function exRowsHTML(rows, opts = {}) {
   const mine = mineIds();
   return `<div class="tbl-wrap"><table class="ex"><thead><tr>${opts.showUni ? '<th>大学</th><th>学部</th>' : opts.showFac ? '<th>学部</th>' : ''}<th>学科</th><th>方式</th><th>種別</th><th>受験科目（配点）</th><th>試験日</th><th>出願締切</th><th>合格発表</th><th>手続締切</th><th>ボーダー</th><th></th></tr></thead><tbody>${rows.map(x => {
     const on = mine.has(x.id);
-    return `<tr${on ? ' class="added"' : ''}>${opts.showUni ? `<td>${esc(uniName(x.uni))}</td><td>${esc(facName(x.fac))}</td>` : opts.showFac ? `<td>${esc(facName(x.fac))}</td>` : ''}<td>${esc(depName(x.dep) || '—')}</td><td>${esc(x.met)}${x.note ? `<div class="note">${esc(x.note)}</div>` : ''}</td>
+    return `<tr${on ? ' class="added"' : ''}>${opts.showUni ? `<td>${esc(uniName(x.uni))}</td><td>${esc(facName(x.fac))}</td>` : opts.showFac ? `<td>${esc(facName(x.fac))}</td>` : ''}<td>${esc(depName(x.dep) || '—')}</td><td>${esc(x.met)}${x.note ? `<div class="note">${esc(x.note)}</div>` : ''}${mpHTML(x)}</td>
       <td><span class="chip k-${esc(x.kind)}">${esc(x.kind)}</span>${x.conf && !/確定/.test(x.conf) ? ` <span class="chip conf">${esc(x.conf)}</span>` : ''}</td>
       <td class="sj">${subjHTML(x) || '<span class="note">—</span>'}</td>
       <td class="d">${x.date ? fmt(x.date) : (x.kind === '共テ利用' ? '共テのみ' : '—')}</td><td class="d">${fmt(x.close) || '—'}</td><td class="d">${fmt(x.ann) || '—'}</td><td class="d">${fmt(x.proc) || '—'}</td>
@@ -1395,6 +1405,7 @@ function uniDetailHTML(u, s, kyoOnly) {
       : kindsHere.map(k => `<button class="fchip" data-kind="${k}" aria-pressed="${s.kinds.has(k)}">${k}</button>`).join('')}
       <input class="inp search" id="${kyoOnly ? 'k-fq' : 's-fq'}" placeholder="学部・学科・方式で絞り込み（例：情報、数学）" value="${esc(fq)}">${sortBarHTML()}</div>
     ${subjBarHTML()}
+    ${M.rows.some(x => x.uni === u && x.mp) ? `<div class="mpnote">${MP_NOTE}</div>` : ''}
     ${facs.length ? facs.map(f => `<details class="fac" data-fac="${esc(f)}"${open ? ' open' : ''}><summary>${esc(facName(f))}<span class="c">${byFac[f].length}件</span></summary><div class="fac-body">${open ? exRowsHTML(sortRows(byFac[f])) : ''}</div></details>`).join('')
       : `<div class="empty">条件に合う入試がありません。${kyoOnly ? '' : '上の種別ボタンで「共テ利用」なども選べます。'}</div>`}`;
 }
@@ -1585,9 +1596,9 @@ function printHTMLFor(st, listOnly) {
     <div class="prof"><div>英検：${esc(pf.eiken || '—')}${pf.cse ? `（CSE ${esc(pf.cse)}）` : ''}${ext ? `／${esc(ext)}` : ''}</div><div>共テ目標：${r.mx ? `${r.tg}/${r.mx}点（${Math.round(r.tg / r.mx * 100)}%）` : '—'}${r.mkMax ? `　直近模試 ${r.mk}/${r.mkMax}` : ''}</div>
     <div>第1志望：${esc(pf.hope1 || '—')}</div><div>志望系統：${esc(pf.field || '—')}</div>${(pf.subj || []).length ? `<div style="grid-column:1/-1">受験科目：${esc(subjNames(pf.subj))}</div>` : ''}</div>
     <table><thead><tr><th>試験日</th><th>大学・学部・学科</th><th>方式</th><th>出願期間</th><th>合格発表</th><th>手続締切</th><th>位置づけ</th><th>結果</th></tr></thead><tbody>
-    ${rows.map((p, i) => { const x = exOf(p); const sep = x.kind === '共テ利用' && (i === 0 || exOf(rows[i - 1]).kind !== '共テ利用') ? `<tr class="sep"><td colspan="8"><b>共通テスト利用（大学独自の試験日なし・合格発表順）</b></td></tr>` : ''; return `${sep}<tr><td class="d">${x.kind === '共テ利用' ? '共テ利用' : (fmt(x.date) || '—')}</td><td>${esc(label(x))}</td><td>${esc(x.met)}${br}<small>${esc(x.kind)}${borderText(x) ? '・' + esc(borderText(x)) : ''}</small>${subjText(x) ? `<small class="sj">${esc(subjText(x, ' ／ '))}</small>` : ''}</td><td class="d">${x.open ? fmt(x.open, false) + '〜' : ''}${fmt(x.close) || '要確認'}</td><td class="d">${fmt(x.ann) || '要確認'}</td><td class="d">${fmt(x.proc) || '要確認'}</td><td class="nw">${esc(p.pref || '—')}</td><td class="nw">${esc(p.status || '—')}${p.memo ? `${br}<small style="white-space:normal">${esc(p.memo)}</small>` : ''}</td></tr>`; }).join('') || '<tr><td colspan="8">登録なし</td></tr>'}
+    ${rows.map((p, i) => { const x = exOf(p); const sep = x.kind === '共テ利用' && (i === 0 || exOf(rows[i - 1]).kind !== '共テ利用') ? `<tr class="sep"><td colspan="8"><b>共通テスト利用（大学独自の試験日なし・合格発表順）</b></td></tr>` : ''; return `${sep}<tr><td class="d">${x.kind === '共テ利用' ? '共テ利用' : (fmt(x.date) || '—')}</td><td>${esc(label(x))}</td><td>${esc(x.met)}${br}<small>${esc(x.kind)}${borderText(x) ? '・' + esc(borderText(x)) : ''}</small>${subjText(x) ? `<small class="sj">${esc(subjText(x, ' ／ '))}</small>` : ''}${x.mp ? `<small class="sj">${MP_LABEL}：${esc(x.mp)}</small>` : ''}</td><td class="d">${x.open ? fmt(x.open, false) + '〜' : ''}${fmt(x.close) || '要確認'}</td><td class="d">${fmt(x.ann) || '要確認'}</td><td class="d">${fmt(x.proc) || '要確認'}</td><td class="nw">${esc(p.pref || '—')}</td><td class="nw">${esc(p.status || '—')}${p.memo ? `${br}<small style="white-space:normal">${esc(p.memo)}</small>` : ''}</td></tr>`; }).join('') || '<tr><td colspan="8">登録なし</td></tr>'}
     </tbody></table>
-    <p class="foot">日程は大学データ（${esc(M.settings.updated || '')}時点）によるものです。出願前に必ず各大学の募集要項で確認してください。</p></section>`;
+    <p class="foot">日程は大学データ（${esc(M.settings.updated || '')}時点）によるものです。出願前に必ず各大学の募集要項で確認してください。${rows.some(p => exOf(p).mp) ? '「昨年の合格最低点」は旺文社「2026年 合格最低点」より（目安）。' : ''}</p></section>`;
   if (listOnly) return head;
   return head + `
     <section class="pp"><h1>${esc(st.name)}さんの受験カレンダー</h1><div class="meta"><span>◎試験　〆出願締切　発 合格発表　手 手続締切</span><span>${esc(clsL(st.cls))} ${esc(st.no)}番</span></div>
@@ -1792,7 +1803,7 @@ function tDetailHTML(key) {
     <div class="panel" style="margin-bottom:12px;font-size:14px"><div>英検：${esc(pf.eiken || '—')} ${pf.cse ? `CSE ${esc(pf.cse)}` : ''} ${(pf.ext || []).filter(e => e.type).map(e => esc(e.type + ' ' + (e.score || ''))).join('、')}</div>
       <div>${kyoTotalText(pf)}（共テ${pf.kyoTake === false ? '受験しない' : '受験する'}）</div><div>第1志望：${esc(pf.hope1 || '—')}　系統：${esc(pf.field || '—')}</div>${(pf.subj || []).length ? `<div>受験科目：${esc(subjNames(pf.subj))}</div>` : ''}${pf.memo ? `<div class="notice info" style="margin-bottom:0">生徒から：${esc(pf.memo)}</div>` : ''}</div>
     <div class="tbl-wrap"><table class="ex"><thead><tr><th>試験日</th><th>大学・学部・学科</th><th>方式</th><th>出願締切</th><th>発表</th><th>手続</th><th>位置づけ</th><th>結果</th><th>メモ</th><th></th></tr></thead><tbody>
-    ${ps.map((p, i) => { const x = exOf(p); const w = warningsFor(p, ps.filter(q => q.status !== '取りやめ')).filter(w => w.bad); const sep = x.kind === '共テ利用' && (i === 0 || exOf(ps[i - 1]).kind !== '共テ利用') ? `<tr><td colspan="10" style="background:var(--sunken);font-weight:700;font-size:12.5px">共通テスト利用（大学独自の試験日なし・合格発表順）</td></tr>` : ''; return `${sep}<tr><td class="d">${x.kind === '共テ利用' ? '共テ利用' : fmt(x.date)}</td><td>${esc(label(x))}${w.length ? `<div class="w bad">${esc(w.map(z => z.t).join(' / '))}</div>` : ''}</td><td>${esc(x.met)}${subjText(x) || borderText(x) ? `<div class="note">${esc([borderText(x), subjText(x)].filter(Boolean).join('／'))}</div>` : ''}</td><td class="d">${fmt(x.close)}</td><td class="d">${fmt(x.ann)}</td><td class="d">${fmt(x.proc)}</td><td>${esc(p.pref || '—')}</td><td>${esc(p.status || '—')}</td><td>${esc(p.memo || '')}</td><td>${fbReady() ? `<button class="btn sm ghost danger" data-tdel="${esc(p.id)}" data-key="${esc(key)}"${STATE.teacher.saving ? ' disabled' : ''}>削除</button>` : ''}</td></tr>`; }).join('') || '<tr><td colspan="10">未登録</td></tr>'}
+    ${ps.map((p, i) => { const x = exOf(p); const w = warningsFor(p, ps.filter(q => q.status !== '取りやめ')).filter(w => w.bad); const sep = x.kind === '共テ利用' && (i === 0 || exOf(ps[i - 1]).kind !== '共テ利用') ? `<tr><td colspan="10" style="background:var(--sunken);font-weight:700;font-size:12.5px">共通テスト利用（大学独自の試験日なし・合格発表順）</td></tr>` : ''; return `${sep}<tr><td class="d">${x.kind === '共テ利用' ? '共テ利用' : fmt(x.date)}</td><td>${esc(label(x))}${w.length ? `<div class="w bad">${esc(w.map(z => z.t).join(' / '))}</div>` : ''}</td><td>${esc(x.met)}${subjText(x) || borderText(x) ? `<div class="note">${esc([borderText(x), subjText(x)].filter(Boolean).join('／'))}</div>` : ''}${mpHTML(x)}</td><td class="d">${fmt(x.close)}</td><td class="d">${fmt(x.ann)}</td><td class="d">${fmt(x.proc)}</td><td>${esc(p.pref || '—')}</td><td>${esc(p.status || '—')}</td><td>${esc(p.memo || '')}</td><td>${fbReady() ? `<button class="btn sm ghost danger" data-tdel="${esc(p.id)}" data-key="${esc(key)}"${STATE.teacher.saving ? ' disabled' : ''}>削除</button>` : ''}</td></tr>`; }).join('') || '<tr><td colspan="10">未登録</td></tr>'}
     </tbody></table></div>
     ${fbReady() ? `<details class="panel" style="margin-top:12px"${STATE.teacher.addq ? ' open' : ''}><summary style="cursor:pointer;font-weight:700">受験校を追加する</summary>
       <input id="t-addq" class="inp" data-key="${esc(key)}" placeholder="大学名・学部・方式で探す（例：明治 理工）" value="${esc(STATE.teacher.addq || '')}" style="margin-top:8px">
@@ -1832,7 +1843,7 @@ const AI_TEMPLATE = `あなたは高校の進路指導担当教員の補助を�
 ## 面談での声かけ案（2〜3文）
 
 【注意】
-・ボーダー（偏差値・共テ得点率）は目安。合否を断定しない
+・ボーダー（偏差値・共テ得点率）や昨年の合格最低点は目安。合否を断定しない
 ・日程が「要確認」のものは断定せず、募集要項での確認を促す
 ・データにない大学・方式を提案するときは、その旨を明記する`;
 function loadAI() { let a = {}; try { a = JSON.parse(localStorage.getItem(AI_KEY)) || {}; } catch (e) { } return Object.assign({ template: AI_TEMPLATE, hideName: false }, a); }
@@ -1871,7 +1882,7 @@ function studentBrief(s, hide) {
   L.push('', '受験予定（試験日順）：');
   planOrder(ps).forEach(p => {
     const x = exOf(p);
-    L.push(`- ${x.kind === '共テ利用' ? '共テ利用' : fmt(x.date)}｜${label(x)}｜${x.met}（${x.kind}）｜ボーダー ${borderText(x) || '不明'}${subjText(x) ? `｜科目 ${subjText(x)}` : ''}｜出願締切 ${fmt(x.close) || '要確認'}｜発表 ${fmt(x.ann) || '要確認'}｜手続締切 ${fmt(x.proc) || '要確認'}｜位置づけ ${p.pref || '未入力'}｜結果 ${p.status || '未定'}${p.memo ? `｜本人メモ：${p.memo}` : ''}`);
+    L.push(`- ${x.kind === '共テ利用' ? '共テ利用' : fmt(x.date)}｜${label(x)}｜${x.met}（${x.kind}）｜ボーダー ${borderText(x) || '不明'}${x.mp ? `｜${MP_LABEL} ${x.mp}` : ''}${subjText(x) ? `｜科目 ${subjText(x)}` : ''}｜出願締切 ${fmt(x.close) || '要確認'}｜発表 ${fmt(x.ann) || '要確認'}｜手続締切 ${fmt(x.proc) || '要確認'}｜位置づけ ${p.pref || '未入力'}｜結果 ${p.status || '未定'}${p.memo ? `｜本人メモ：${p.memo}` : ''}`);
   });
   if (!ps.length) L.push('（まだ登録なし）');
   const warns = [...new Set(ps.flatMap(p => warningsFor(p, ps).filter(w => !w.ok).map(w => w.t)))];
@@ -2031,8 +2042,8 @@ async function checkFile(f) {
   render();
 }
 function picksCSVRows(list) {
-  const out = [['組', '番号', '氏名', '区分', '大学', '学部', '学科', '方式', '種別', '試験日', '出願開始', '出願締切', '合格発表', '手続締切', '位置づけ', '結果', 'メモ', 'ボーダー偏差値', '共テボーダー', '共テ科目', '共テ配点', '個別科目', '個別配点', '確度', 'ID']];
-  for (const s of list) for (const p of planOrder(s.picks || [])) { const x = exOf(p); out.push([s.cls, s.no, s.name, x.grp, uniName(x.uni), facName(x.fac), depName(x.dep), x.met, x.kind, x.date, x.open, x.close, x.ann, x.proc, p.pref, p.status, p.memo, x.rank, x.bd, x.kt, x.kp, x.nt, x.np, x.conf, p.id]); }
+  const out = [['組', '番号', '氏名', '区分', '大学', '学部', '学科', '方式', '種別', '試験日', '出願開始', '出願締切', '合格発表', '手続締切', '位置づけ', '結果', 'メモ', 'ボーダー偏差値', '共テボーダー', '共テ科目', '共テ配点', '個別科目', '個別配点', '確度', '合格最低点', 'ID']];
+  for (const s of list) for (const p of planOrder(s.picks || [])) { const x = exOf(p); out.push([s.cls, s.no, s.name, x.grp, uniName(x.uni), facName(x.fac), depName(x.dep), x.met, x.kind, x.date, x.open, x.close, x.ann, x.proc, p.pref, p.status, p.memo, x.rank, x.bd, x.kt, x.kp, x.nt, x.np, x.conf, x.mp || '', p.id]); }
   return out;
 }
 function studentsCSVRows(list) {
@@ -2052,8 +2063,8 @@ function daysCSVRows(list) {
 }
 const stamp8 = () => today.replace(/-/g, '');
 function masterSheetRows(rows) {
-  const head = ['ID', '区分', '大学', '学部', '学科', '方式', '種別', '試験日', '出願開始', '出願締切', '合格発表', '手続締切', 'ボーダー偏差値', '共テボーダー', '共テ科目', '共テ配点', '個別科目', '個別配点', '科目要件', '備考', '確度', '出典'];
-  return [head].concat(rows.map(x => [x.id, x.grp, x.uni, x.fac, x.dep, x.met, x.kind, x.date, x.open, x.close, x.ann, x.proc, x.rank, x.bd || '', x.kt || '', x.kp || '', x.nt || '', x.np || '', x.req || '', x.note, x.conf, x.src]));
+  const head = ['ID', '区分', '大学', '学部', '学科', '方式', '種別', '試験日', '出願開始', '出願締切', '合格発表', '手続締切', 'ボーダー偏差値', '共テボーダー', '共テ科目', '共テ配点', '個別科目', '個別配点', '科目要件', '備考', '確度', '出典', '合格最低点'];
+  return [head].concat(rows.map(x => [x.id, x.grp, x.uni, x.fac, x.dep, x.met, x.kind, x.date, x.open, x.close, x.ann, x.proc, x.rank, x.bd || '', x.kt || '', x.kp || '', x.nt || '', x.np || '', x.req || '', x.note, x.conf, x.src, x.mp || '']));
 }
 function saveMasterXlsx(rows, name) {
   const wb = XLSX.utils.book_new();
