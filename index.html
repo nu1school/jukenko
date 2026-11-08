@@ -395,7 +395,7 @@ function normDate(v) {
   return m ? `${m[1]}-${pad2(m[2])}-${pad2(m[3])}` : '';
 }
 function strHash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(16).padStart(8, '0'); }
-const APP_VER = '11/09-両面3';  // 画面の版（更新のたびに変える）
+const APP_VER = '11/09-両面4';  // 画面の版（更新のたびに変える）
 const clsL = c => /^[A-Za-zＡ-Ｚ]$/.test(String(c)) ? `${c}組` : String(c ?? '');
 async function sha256(t) { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t)); return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join(''); }
 const GH_KEY = 'jukenko_planner_github_token';
@@ -1620,7 +1620,7 @@ function printHTMLFor(st, listOnly) {
 function calPrintHTMLFor(st) {
   const ps = (st.picks || []).filter(p => !['取りやめ', '不合格'].includes(p.status));
   const map = eventMap(ps);
-  const months = calMonths().filter(([y, m]) => Object.keys(map).some(k => k.startsWith(`${y}-${pad2(m + 1)}`)));
+  const months = calMonths().filter(([y, m]) => Object.keys(map).some(k => k.startsWith(`${y}-${pad2(m + 1)}`)) || M.settings.kyo.some(k => k.startsWith(`${y}-${pad2(m + 1)}`)));
   return months.map(([y, m]) => {
     const first = new Date(y, m, 1), days = new Date(y, m + 1, 0).getDate(); const cells = [];
     for (let i = 0; i < first.getDay(); i++) cells.push('<td class="o"></td>');
