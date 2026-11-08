@@ -339,7 +339,7 @@ table.ex tr.added td:last-child{background:var(--c-exam-soft)}
 .pp .pcal td{height:15mm;font-size:6.6pt;line-height:1.25;vertical-align:top;padding:0.6mm 0.8mm;border:0.4pt solid #c9d0dc;overflow:hidden}
 .pp .pcal td .n{font-weight:700;font-size:7.5pt}
 .pp .pcal td.o{background:#f3f3f3}
-.pp .ev{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pp .ev{display:block;white-space:normal;overflow:visible;overflow-wrap:anywhere;line-height:1.2;margin-bottom:0.3mm}
 .pp .e-apply{color:#8a4f00} .pp .e-exam{color:#1d3c78;font-weight:700} .pp .e-ann{color:#1f6a3f} .pp .e-proc{color:#9b2c52} .pp .e-kyo{color:#5a3aa0;font-weight:700}
 .pp .foot{font-size:7.5pt;color:#555;margin-top:2mm}
 .pp small.sj{display:block;font-size:7pt;color:#333;line-height:1.3;margin-top:0.5mm}
@@ -348,7 +348,7 @@ table.ex tr.added td:last-child{background:var(--c-exam-soft)}
 .pp.compact td,.pp.compact th{padding:0.5mm 1.2mm;line-height:1.25}
 .pp.tiny table{font-size:6.4pt}
 .pp.compact .prof{padding:1mm 3mm;margin-bottom:2mm}
-.pp .ev{background:none!important;padding:0;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pp .ev{background:none!important;padding:0;display:block;white-space:normal;overflow:visible;overflow-wrap:anywhere}
 .pp.calonly .meta{margin-bottom:2mm}
 .pp.calonly .pcal{page-break-inside:avoid;break-inside:avoid}
 .pp.calonly .pcal td{font-size:8pt;line-height:1.3;padding:0.8mm 1.2mm}
@@ -395,7 +395,7 @@ function normDate(v) {
   return m ? `${m[1]}-${pad2(m[2])}-${pad2(m[3])}` : '';
 }
 function strHash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(16).padStart(8, '0'); }
-const APP_VER = '11/09-両面2';  // 画面の版（更新のたびに変える）
+const APP_VER = '11/09-両面3';  // 画面の版（更新のたびに変える）
 const clsL = c => /^[A-Za-zＡ-Ｚ]$/.test(String(c)) ? `${c}組` : String(c ?? '');
 async function sha256(t) { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t)); return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join(''); }
 const GH_KEY = 'jukenko_planner_github_token';
@@ -804,6 +804,16 @@ function borderText(x) {
   if (x.bd) a.push('共テ ' + x.bd + '%');
   return a.join('・');
 }
+/* 河合塾データで途中までに省略されている学部名を、正式な名前に直して表示する（IDは変えない） */
+const FAC_FIX = {
+  '明治|情報コミュ': '情報コミュニケーション', '立教|異文化コミュ': '異文化コミュニケーション', '立教|コミュニティ': 'コミュニティ福祉',
+  '中央|商－フレ': '商（フレックス）', '法政|グローバル': 'グローバル教養', '法政|キャリア': 'キャリアデザイン',
+  '成城|社会イノベ': '社会イノベーション', '東京電機|システムデザ': 'システムデザイン工', '東京都立|システムデザ': 'システムデザイン',
+  '東洋|福祉社会デザ': '福祉社会デザイン', '東洋|健康スポーツ': '健康スポーツ科学', '亜細亜|健康スポーツ': '健康スポーツ科学',
+  '上智|総合人間': '総合人間科学', '駒澤|医療健康': '医療健康科学', '駒澤|グローバル': 'グローバル・メディア・スタディーズ', '駒澤|法－フレＢ': '法（フレックスＢ）',
+  '専修|ネットワーク': 'ネットワーク情報', '専修|国際コミュ': '国際コミュニケーション', '東京経済|コミュニケ': 'コミュニケーション', '東京経済|キャリア': 'キャリアデザインプログラム',
+  '立正|地球環境': '地球環境科学', '昭和女子|グローバル': 'グローバルビジネス', '群馬県立女子|国際コミュ': '国際コミュニケーション'
+};
 function ingestWorkbook(wb) {
   const sh = wb.Sheets['入試日程'] || wb.Sheets[wb.SheetNames[0]];
   const raw = XLSX.utils.sheet_to_json(sh, { defval: '', raw: true });
@@ -820,6 +830,7 @@ function ingestWorkbook(wb) {
       mp: String(r['合格最低点'] || '').trim()
     };
     if (!x.uni) continue;
+    x.fac = FAC_FIX[x.uni + '|' + x.fac] || x.fac;
     if (!x.id) x.id = 'x' + strHash([x.uni, x.fac, x.dep, x.met, x.kind, x.date].join('|'));
     while (byId[x.id]) x.id += '_';
     byId[x.id] = x; rows.push(x);
