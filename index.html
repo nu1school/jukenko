@@ -395,7 +395,7 @@ function normDate(v) {
   return m ? `${m[1]}-${pad2(m[2])}-${pad2(m[3])}` : '';
 }
 function strHash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(16).padStart(8, '0'); }
-const APP_VER = '11/09-両面';  // 画面の版（更新のたびに変える）
+const APP_VER = '11/09-両面2';  // 画面の版（更新のたびに変える）
 const clsL = c => /^[A-Za-zＡ-Ｚ]$/.test(String(c)) ? `${c}組` : String(c ?? '');
 async function sha256(t) { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t)); return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join(''); }
 const GH_KEY = 'jukenko_planner_github_token';
@@ -1603,7 +1603,7 @@ function printHTMLFor(st, listOnly) {
     <p class="foot">日程は大学データ（${esc(M.settings.updated || '')}時点）によるものです。出願前に必ず各大学の募集要項で確認してください。${rows.some(p => exOf(p).mp) ? '「昨年の合格最低点」は旺文社「2026年 合格最低点」より（目安）。' : ''}</p></section>`;
   if (listOnly) return head;
   return head + `
-    <section class="pp"><h1>${esc(st.name)}さんの受験カレンダー</h1><div class="meta"><span>◎試験　〆出願締切　発 合格発表　手 手続締切</span><span>${esc(clsL(st.cls))} ${esc(st.no)}番</span></div>
+    <section class="pp pcalsec"><h1>${esc(st.name)}さんの受験カレンダー</h1><div class="meta"><span>◎試験　〆出願締切　発 合格発表　手 手続締切</span><span>${esc(clsL(st.cls))} ${esc(st.no)}番</span></div>
     ${big ? pcal(big, true) : ''}<div class="pm">${months.filter(x => x !== big).map(x => pcal(x, false)).join('')}</div></section>`;
 }
 function calPrintHTMLFor(st) {
@@ -1626,16 +1626,27 @@ function calPrintHTMLFor(st) {
 }
 /* 両面印刷用：1人分のページ数が奇数なら白紙ページを足して、次の生徒が必ず新しい用紙から始まるようにする */
 const PBLANK = '<section class="pp pblank"><div style="height:4mm"></div></section>';
-function pagesOf(html, landscape) {
+/* 印刷前に1人分を見えない所で組んで、ページからはみ出す分を縮小し、ページ数を数える
+   カレンダーは必ず1ページに収める。一覧は少しだけ（25%以内）はみ出すときだけ縮小 */
+function fitPart(html, landscape) {
   const box = document.createElement('div'); box.id = 'pmeasure';
   box.style.cssText = `position:absolute;left:-99999px;top:0;visibility:hidden;width:${landscape ? 279 : 188}mm`;
   box.innerHTML = html; document.body.appendChild(box);
-  const pageH = (landscape ? 194 : 273) * 96 / 25.4;
-  let n = 0; box.querySelectorAll('.pp').forEach(sec => { const h = sec.getBoundingClientRect().height; n += Math.max(1, Math.ceil((h - 2) / pageH)); });
-  box.remove(); return n;
+  const pageH = (landscape ? 194 : 273) * 96 / 25.4 * 0.97;
+  let n = 0;
+  box.querySelectorAll('.pp').forEach(sec => {
+    let h = sec.getBoundingClientRect().height;
+    const isCal = sec.classList.contains('pcalsec') || sec.classList.contains('calonly');
+    if (h > pageH && (isCal || h < pageH * 1.25)) {
+      let z = pageH / h;
+      for (let k = 0; k < 4 && h > pageH; k++) { sec.style.zoom = z.toFixed(3); h = sec.getBoundingClientRect().height; z *= pageH / h; }
+    }
+    n += Math.max(1, Math.ceil((h - 2) / pageH));
+  });
+  const out = box.innerHTML; box.remove(); return { html: out, pages: n };
 }
-function duplexPad(parts, landscape) {
-  return parts.map((h, i) => (i < parts.length - 1 && pagesOf(h, landscape) % 2 === 1) ? h + PBLANK : h).join('');
+function layoutParts(parts, landscape, duplex) {
+  return parts.map((h, i) => { const f = fitPart(h, landscape); return f.html + (duplex && i < parts.length - 1 && f.pages % 2 === 1 ? PBLANK : ''); }).join('');
 }
 function doPrint(students, mode) {
   let ps = document.getElementById('pageStyle');
@@ -1646,7 +1657,7 @@ function doPrint(students, mode) {
     $('#print').innerHTML = Object.keys(by).sort((a, b) => String(a).localeCompare(String(b), 'ja', { numeric: true })).map(c => classSumHTMLFor(c, by[c])).join('');
   } else {
     const parts = students.map(st => mode === 'cal' ? calPrintHTMLFor(st) : printHTMLFor(st, mode === 'list'));
-    $('#print').innerHTML = (STATE.pdfDuplex && parts.length > 1) ? duplexPad(parts, mode === 'cal') : parts.join('');
+    $('#print').innerHTML = layoutParts(parts, mode === 'cal', STATE.pdfDuplex && parts.length > 1);
   }
   setTimeout(() => window.print(), 60);
 }
