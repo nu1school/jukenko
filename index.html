@@ -395,8 +395,14 @@ function normDate(v) {
   return m ? `${m[1]}-${pad2(m[2])}-${pad2(m[3])}` : '';
 }
 function strHash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(16).padStart(8, '0'); }
-const APP_VER = '11/09-両面4';  // 画面の版（更新のたびに変える）
-const clsL = c => /^[A-Za-zＡ-Ｚ]$/.test(String(c)) ? `${c}組` : String(c ?? '');
+const APP_VER = '11/17-学年';  // 画面の版（更新のたびに変える）
+/* 学年：3年生は従来どおり組だけ（例 "A"）で保存、1・2年生は "1-A" "2-A" の形で保存する（既存データは3年扱い） */
+const gradeOf = c => { const m = /^([123])-(.+)$/.exec(String(c ?? '')); return m ? +m[1] : 3; };
+const baseCls = c => { const m = /^([123])-(.+)$/.exec(String(c ?? '')); return m ? m[2] : String(c ?? ''); };
+const mkCls = (g, c) => (+g === 3 || !c) ? c : `${g}-${c}`;
+const clsL = c => { const b = baseCls(c); return c == null || c === '' ? '' : `${gradeOf(c)}年` + (/^[A-Za-zＡ-Ｚ0-9０-９]{1,2}$/.test(b) ? `${b}組` : b); };
+const clsSort = (a, b) => gradeOf(a) - gradeOf(b) || baseCls(a).localeCompare(baseCls(b), 'ja', { numeric: true });
+const gradeSel = (id, g) => `<select id="${id}" class="inp">${[1, 2, 3].map(n => `<option value="${n}"${+g === n ? ' selected' : ''}>${n}年</option>`).join('')}</select>`;
 async function sha256(t) { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t)); return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join(''); }
 const GH_KEY = 'jukenko_planner_github_token';
 const ghToken = () => { try { return localStorage.getItem(GH_KEY) || ''; } catch (e) { return ''; } };
@@ -657,7 +663,7 @@ async function tDeleteSelected() {
 async function tSaveAccount(key) {
   const s = findStu(key); if (!s) return;
   if (!fbAuth()) { toast('先に先生用ログインをしてください'); return; }
-  const cls = $('#ta-cls').value.trim(), no = String(parseInt($('#ta-no').value, 10) || '').trim(), name = $('#ta-name').value.trim(), pw = $('#ta-pw').value;
+  const cls = mkCls($('#ta-grade').value, $('#ta-cls').value.trim()), no = String(parseInt($('#ta-no').value, 10) || '').trim(), name = $('#ta-name').value.trim(), pw = $('#ta-pw').value;
   const msg = m => { const el = $('#ta-msg'); if (el) el.textContent = m; };
   if (!cls || !no || !name) return msg('組・番号・氏名を入れてください');
   if (pw.length < 6) return msg('パスワードは6文字以上にしてください');
@@ -1064,7 +1070,8 @@ function loginHTML() {
     <p class="sub">${esc(C.SCHOOL || '')} 受験する大学・方式を選んで、日程表とカレンダーを作ります。</p>
     ${resumable ? `<div class="notice info" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="flex:1 1 180px">この端末で <b>${esc(clsL(saved.cls))} ${esc(saved.no)}番 ${esc(saved.name)}</b> さんがログイン中です。</span><button type="button" class="btn primary" data-act="resume">続きから</button></div>` : ''}
     ${fb ? `<div class="filters" style="margin-bottom:10px"><button type="button" class="fchip" data-lmode="login" aria-pressed="${mode === 'login'}">ログイン</button><button type="button" class="fchip" data-lmode="new" aria-pressed="${mode === 'new'}">はじめて使う</button></div>` : ''}
-    <div class="row2"><div class="field"><label for="l-cls">組</label>${clsInput}</div>
+    <div class="row2"><div class="field"><label for="l-grade">学年</label>${gradeSel('l-grade', STATE.lgrade || 3)}</div><div class="field"><label for="l-cls">組</label>${clsInput}</div></div>
+    <div class="row2">
     <div class="field"><label for="l-no">番号</label><input id="l-no" class="inp num" inputmode="numeric" placeholder="例：12"></div></div>
     <div class="field"><label for="l-name">氏名</label><input id="l-name" class="inp" placeholder="例：須藤 太郎"></div>
     ${fb ? `<div class="field"><label for="l-pw">パスワード${mode === 'new' ? '（自分で決める・6文字以上）' : ''}</label><input id="l-pw" class="inp" type="password" autocomplete="${mode === 'new' ? 'new-password' : 'current-password'}"></div>
@@ -1072,7 +1079,7 @@ function loginHTML() {
       <p class="notice info" style="font-size:13px">パスワードは<b>あとから自分では変えられません</b>。忘れないようにメモしてください。忘れたときは担任の先生に聞いてください。</p>` : ''}` : ''}
     <div class="err-msg" id="l-err"></div>
     <button class="btn primary" style="width:100%" id="l-go">${!fb ? 'はじめる' : mode === 'new' ? '登録してはじめる' : 'ログイン'}</button>
-    <p class="note">${fb ? 'どの端末からでも、組・番号・氏名・パスワードで続きから使えます。' : '入力はこの端末に自動で保存されます。'}iPadでは共有ボタンから「ホーム画面に追加」して開くと便利です。</p>
+    <p class="note">${fb ? 'どの端末からでも、学年・組・番号・氏名・パスワードで続きから使えます。' : '入力はこの端末に自動で保存されます。'}iPadでは共有ボタンから「ホーム画面に追加」して開くと便利です。</p>
     <p style="text-align:right;margin:10px 0 0"><button type="button" class="linkbtn" data-act="tlogin">教員の方はこちら</button></p>
   </form>`;
 }
@@ -1087,9 +1094,9 @@ function startStudent(me, msg) {
 }
 async function doLogin(e) {
   e.preventDefault();
-  const cls = $('#l-cls').value.trim(), no = String(parseInt($('#l-no').value, 10) || '').trim(), name = $('#l-name').value.trim();
+  const cls = mkCls($('#l-grade').value, $('#l-cls').value.trim()), no = String(parseInt($('#l-no').value, 10) || '').trim(), name = $('#l-name').value.trim();
   const err = $('#l-err'); err.textContent = '';
-  if (!cls || !no || !name) { err.textContent = '組・番号・氏名を入れてください。'; return; }
+  if (!cls || !no || !name) { err.textContent = '学年・組・番号・氏名を入れてください。'; return; }
   const saved = loadMe(); const same = saved && String(saved.cls) === cls && String(saved.no) === no ? saved : null;
   if (!fbReady()) {
     if (same) { same.name = name; startStudent(same, '続きから開きました'); return; }
@@ -1665,7 +1672,7 @@ function doPrint(students, mode) {
   ps.textContent = (mode === 'cal' || mode === 'clsum') ? '@page{size:A4 landscape;margin:8mm 9mm}' : '@page{size:A4 portrait;margin:12mm 11mm}';
   if (mode === 'clsum') {
     const by = {}; students.forEach(st => (by[st.cls] = by[st.cls] || []).push(st));
-    $('#print').innerHTML = Object.keys(by).sort((a, b) => String(a).localeCompare(String(b), 'ja', { numeric: true })).map(c => classSumHTMLFor(c, by[c])).join('');
+    $('#print').innerHTML = Object.keys(by).sort(clsSort).map(c => classSumHTMLFor(c, by[c])).join('');
   } else {
     const parts = students.map(st => mode === 'cal' ? calPrintHTMLFor(st) : printHTMLFor(st, mode === 'list'));
     $('#print').innerHTML = layoutParts(parts, mode === 'cal', STATE.pdfDuplex && parts.length > 1);
@@ -1750,17 +1757,17 @@ async function importTexts(texts, quiet) {
 }
 function tFiltered() {
   const t = STATE.teacher; const q = t.q.trim();
-  return t.students.filter(s => (!t.cls || s.cls === t.cls) && (!q || (s.name || '').includes(q)))
-    .sort((a, b) => String(a.cls).localeCompare(String(b.cls), 'ja', { numeric: true }) || (+a.no - +b.no));
+  return t.students.filter(s => (!t.grade || gradeOf(s.cls) === +t.grade) && (!t.cls || s.cls === t.cls) && (!q || (s.name || '').includes(q)))
+    .sort((a, b) => clsSort(a.cls, b.cls) || (+a.no - +b.no));
 }
 function teacherHTML() {
   const t = STATE.teacher;
-  const classes = [...new Set(t.students.map(s => s.cls))].sort((a, b) => String(a).localeCompare(String(b), 'ja', { numeric: true }));
+  const classes = [...new Set(t.students.filter(s => !t.grade || gradeOf(s.cls) === +t.grade).map(s => s.cls))].sort(clsSort);
   const tabs = [['list', '生徒一覧'], ['days', '日別の受験者'], ['ai', 'AI相談'], ['data', 'システム設定']];
   return headerHTML(`<span><b>教員ページ</b> <small class="note" title="画面の版。古い版のときは再読み込みしてください">版 ${APP_VER}</small></span>`, `<button class="btn sm ghost" data-act="logout">終了</button>`) +
     `<div class="wrap"><nav class="tabs">${tabs.map(([k, l]) => `<button class="tab" aria-selected="${t.tab === k}" data-ttab="${k}">${l}</button>`).join('')}</nav>
     ${['list', 'days', 'ai'].includes(t.tab) ? importPanelHTML() : ''}
-    ${['list', 'days'].includes(t.tab) ? `<div class="tools"><select class="inp" id="t-cls" style="width:auto"><option value="">全クラス</option>${classes.map(c => `<option${t.cls === c ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select>
+    ${['list', 'days'].includes(t.tab) ? `<div class="tools"><select class="inp" id="t-grade" style="width:auto"><option value="">全学年</option>${[1, 2, 3].map(n => `<option value="${n}"${+t.grade === n ? ' selected' : ''}>${n}年</option>`).join('')}</select><select class="inp" id="t-cls" style="width:auto"><option value="">全クラス</option>${classes.map(c => `<option value="${esc(c)}"${t.cls === c ? ' selected' : ''}>${esc(clsL(c))}</option>`).join('')}</select>
       <input class="inp" id="t-q" style="width:auto;flex:1 1 160px" placeholder="氏名で検索" value="${esc(t.q)}"></div>` : ''}
     ${t.tab === 'list' ? tListHTML() : t.tab === 'days' ? tDaysHTML() : t.tab === 'ai' ? aiSettingsHTML() : tDataHTML()}</div>
     ${t.detail ? tDetailHTML(t.detail) : ''}`;
@@ -1779,7 +1786,7 @@ function tListHTML() {
       <td><button class="btn sm" data-detail="${esc(key)}">詳細</button> <button class="btn sm primary" data-act="ai-copy" data-key="${esc(key)}">AI用にコピー</button></td></tr>`; }).join('') || '<tr><td colspan="13">上の欄から提出データを読み込んでください。</td></tr>'}
     </tbody></table></div>`;
 }
-const tClasses = () => [...new Set(STATE.teacher.students.map(s => s.cls))].sort((a, b) => String(a).localeCompare(String(b), 'ja', { numeric: true }));
+const tClasses = () => [...new Set(STATE.teacher.students.filter(s => !STATE.teacher.grade || gradeOf(s.cls) === +STATE.teacher.grade).map(s => s.cls))].sort(clsSort);
 function classPdfHTML() {
   const t = STATE.teacher; const cs = tClasses(); if (!cs.length) return '';
   const mode = STATE.clsPdfMode || 'sum';
@@ -1849,7 +1856,7 @@ function tDetailHTML(key) {
       <div id="t-addres" style="margin-top:8px">${tAddResultsHTML(key, STATE.teacher.addq)}</div>
       <p class="note" style="margin-bottom:0">追加・削除はすぐ保存され、生徒が次にページを開いたとき、生徒の画面にも反映されます。</p></details>` : ''}
     ${fbReady() && s.sid ? `<details class="panel" style="margin-top:12px"><summary style="cursor:pointer;font-weight:700">組・番号・氏名・パスワード</summary>
-      <div class="row2" style="margin-top:8px"><div class="field"><label for="ta-cls">組</label><input id="ta-cls" class="inp" value="${esc(s.cls)}"></div><div class="field"><label for="ta-no">番号</label><input id="ta-no" class="inp num" value="${esc(s.no)}"></div></div>
+      <div class="row2" style="margin-top:8px"><div class="field"><label for="ta-grade">学年</label>${gradeSel('ta-grade', gradeOf(s.cls))}</div><div class="field"><label for="ta-cls">組</label><input id="ta-cls" class="inp" value="${esc(baseCls(s.cls))}"></div><div class="field"><label for="ta-no">番号</label><input id="ta-no" class="inp num" value="${esc(s.no)}"></div></div>
       <div class="row2"><div class="field"><label for="ta-name">氏名</label><input id="ta-name" class="inp" value="${esc(s.name)}"></div><div class="field"><label for="ta-pw">パスワード</label><input id="ta-pw" class="inp num" value="${esc(s.pw || '')}" autocomplete="off"></div></div>
       <div class="tools" style="margin:0"><button class="btn" data-act="tacct" data-key="${esc(key)}">変更を保存</button><span class="note" id="ta-msg"></span></div>
       <p class="note" style="margin-bottom:0">パスワードを忘れた生徒には、ここに出ているパスワードを伝えてください。変えた場合は新しいパスワードを伝えます。</p></details>` : ''}
@@ -1937,7 +1944,7 @@ function tDaysHTML() {
   const days = Object.keys(by).sort();
   return `<div class="tools"><button class="btn" data-act="csv-days">日別の受験者CSV</button><span class="note">2月の公欠・出席管理や、同じ日に受験する生徒の確認に使えます。</span></div>
     <div class="daylist">${days.map(d => `<details><summary><b class="num">${fmt(d)}</b><span>${by[d].length}人</span><span class="note">${[...new Set(by[d].map(e => uniName(e.x.uni)))].slice(0, 6).join('・')}${new Set(by[d].map(e => e.x.uni)).size > 6 ? ' ほか' : ''}</span></summary>
-      <div class="names">${by[d].sort((a, b) => String(a.s.cls).localeCompare(String(b.s.cls), 'ja', { numeric: true }) || a.s.no - b.s.no).map(e => `<div>${esc(clsL(e.s.cls))} ${esc(e.s.no)}番 ${esc(e.s.name)}：${esc(label(e.x))} ${esc(e.x.met)}</div>`).join('')}</div></details>`).join('') || '<div class="empty">まだ受験予定が登録されていません。</div>'}</div>`;
+      <div class="names">${by[d].sort((a, b) => clsSort(a.s.cls, b.s.cls) || a.s.no - b.s.no).map(e => `<div>${esc(clsL(e.s.cls))} ${esc(e.s.no)}番 ${esc(e.s.name)}：${esc(label(e.x))} ${esc(e.x.met)}</div>`).join('')}</div></details>`).join('') || '<div class="empty">まだ受験予定が登録されていません。</div>'}</div>`;
 }
 function tDataHTML() {
   const g = STATE.teacher.gh; if (!g) setTimeout(() => checkGh().then(() => { if (STATE.view === 'teacher' && STATE.teacher.tab === 'data') render(); }), 0);
@@ -2081,23 +2088,23 @@ async function checkFile(f) {
   render();
 }
 function picksCSVRows(list) {
-  const out = [['組', '番号', '氏名', '区分', '大学', '学部', '学科', '方式', '種別', '試験日', '出願開始', '出願締切', '合格発表', '手続締切', '位置づけ', '結果', 'メモ', 'ボーダー偏差値', '共テボーダー', '共テ科目', '共テ配点', '個別科目', '個別配点', '確度', '合格最低点', 'ID']];
-  for (const s of list) for (const p of planOrder(s.picks || [])) { const x = exOf(p); out.push([s.cls, s.no, s.name, x.grp, uniName(x.uni), facName(x.fac), depName(x.dep), x.met, x.kind, x.date, x.open, x.close, x.ann, x.proc, p.pref, p.status, p.memo, x.rank, x.bd, x.kt, x.kp, x.nt, x.np, x.conf, x.mp || '', p.id]); }
+  const out = [['学年', '組', '番号', '氏名', '区分', '大学', '学部', '学科', '方式', '種別', '試験日', '出願開始', '出願締切', '合格発表', '手続締切', '位置づけ', '結果', 'メモ', 'ボーダー偏差値', '共テボーダー', '共テ科目', '共テ配点', '個別科目', '個別配点', '確度', '合格最低点', 'ID']];
+  for (const s of list) for (const p of planOrder(s.picks || [])) { const x = exOf(p); out.push([gradeOf(s.cls), baseCls(s.cls), s.no, s.name, x.grp, uniName(x.uni), facName(x.fac), depName(x.dep), x.met, x.kind, x.date, x.open, x.close, x.ann, x.proc, p.pref, p.status, p.memo, x.rank, x.bd, x.kt, x.kp, x.nt, x.np, x.conf, x.mp || '', p.id]); }
   return out;
 }
 function studentsCSVRows(list) {
-  const out = [['組', '番号', '氏名', '受験校数', '一般・共テ併用', '共テ利用', '国公立', '英検', 'CSE', 'その他の試験', '共テ受験', ...KYO_SUBJ.map(s => s[1] + '目標'), '共テ目標合計', '目標満点', '目標得点率', '直近模試合計', '第1志望', '志望系統', '受験科目', '生徒メモ', '最終更新']];
+  const out = [['学年', '組', '番号', '氏名', '受験校数', '一般・共テ併用', '共テ利用', '国公立', '英検', 'CSE', 'その他の試験', '共テ受験', ...KYO_SUBJ.map(s => s[1] + '目標'), '共テ目標合計', '目標満点', '目標得点率', '直近模試合計', '第1志望', '志望系統', '受験科目', '生徒メモ', '最終更新']];
   for (const s of list) {
     const ps = (s.picks || []).filter(p => p.status !== '取りやめ'); const k = n => ps.filter(p => n.includes(exOf(p).kind)).length; const pf = s.profile || {}; const r = kyoTotals(pf);
-    out.push([s.cls, s.no, s.name, ps.length, k(['一般', '共テ併用']), k(['共テ利用']), k(['国公立']), pf.eiken || '', pf.cse || '', (pf.ext || []).filter(e => e.type).map(e => e.type + ' ' + (e.score || '')).join(' / '), pf.kyoTake === false ? 'しない' : 'する',
+    out.push([gradeOf(s.cls), baseCls(s.cls), s.no, s.name, ps.length, k(['一般', '共テ併用']), k(['共テ利用']), k(['国公立']), pf.eiken || '', pf.cse || '', (pf.ext || []).filter(e => e.type).map(e => e.type + ' ' + (e.score || '')).join(' / '), pf.kyoTake === false ? 'しない' : 'する',
       ...KYO_SUBJ.map(([kk]) => ((pf.kyo || {})[kk] || {}).t ?? ''), r.mx ? r.tg : '', r.mx || '', r.mx ? Math.round(r.tg / r.mx * 1000) / 10 + '%' : '', r.mkMax ? r.mk : '', pf.hope1 || '', pf.field || '', subjNames(pf.subj), pf.memo || '', s.updated || '']);
   }
   return out;
 }
 function daysCSVRows(list) {
-  const out = [['日付', '曜日', '組', '番号', '氏名', '大学', '学部', '学科', '方式', '結果']]; const rows = [];
-  for (const s of list) for (const p of (s.picks || [])) { if (p.status === '取りやめ') continue; const x = exOf(p); if (!x.date || x.kind === '共テ利用') continue; rows.push([x.date, WD[dOf(x.date).getDay()], s.cls, s.no, s.name, uniName(x.uni), facName(x.fac), depName(x.dep), x.met, p.status]); }
-  rows.sort((a, b) => a[0].localeCompare(b[0]) || String(a[2]).localeCompare(String(b[2]), 'ja', { numeric: true }) || a[3] - b[3]);
+  const out = [['日付', '曜日', '学年', '組', '番号', '氏名', '大学', '学部', '学科', '方式', '結果']]; const rows = [];
+  for (const s of list) for (const p of (s.picks || [])) { if (p.status === '取りやめ') continue; const x = exOf(p); if (!x.date || x.kind === '共テ利用') continue; rows.push([x.date, WD[dOf(x.date).getDay()], gradeOf(s.cls), baseCls(s.cls), s.no, s.name, uniName(x.uni), facName(x.fac), depName(x.dep), x.met, p.status]); }
+  rows.sort((a, b) => a[0].localeCompare(b[0]) || a[2] - b[2] || String(a[3]).localeCompare(String(b[3]), 'ja', { numeric: true }) || a[4] - b[4]);
   return out.concat(rows);
 }
 const stamp8 = () => today.replace(/-/g, '');
@@ -2339,6 +2346,8 @@ function onInput(t, composing) {
 document.addEventListener('change', e => {
   const t = e.target; const d = t.dataset;
   if (t.id === 't-cls') { STATE.teacher.cls = t.value; render(); return; }
+  if (t.id === 't-grade') { STATE.teacher.grade = t.value; STATE.teacher.cls = ''; render(); return; }
+  if (t.id === 'l-grade') { STATE.lgrade = +t.value; return; }
   if (t.id === 'pdf-withcal' || t.id === 't-withcal') { STATE.pdfCal = t.checked; return; }
   if (t.id === 't-duplex') { STATE.pdfDuplex = t.checked; return; }
   if (t.name === 'clsmode') { STATE.clsPdfMode = t.value; return; }
